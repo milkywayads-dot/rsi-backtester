@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<title>RSI Backtester — Binance 1H</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg0:#050510;--bg1:#0a0a1c;--bg2:#0f0f24;--bg3:#16162e;
+  --b1:#1c1c38;--b2:#28285a;--b3:#3a3a70;
+  --txt:#cccce8;--dim:#606080;--hi:#e8e8ff;
+  --grn:#00f085;--red:#ff3d55;--ora:#ff9020;
+  --acc:#7c6fff;--cyn:#00cfff;
+  --grn-bg:#061a0f;--red-bg:#1a0608;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html{min-height:100%;}
+body{
+  background:var(--bg0);color:var(--txt);
+  font-family:'Outfit',sans-serif;font-size:14px;
+  padding:env(safe-area-inset-top,16px) 16px 60px;
+  -webkit-font-smoothing:antialiased;
+}
+/* bg grid texture */
+body::before{
+  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:
+    linear-gradient(var(--b1) 1px,transparent 1px),
+    linear-gradient(90deg,var(--b1) 1px,transparent 1px);
+  background-size:40px 40px;opacity:.4;
+}
+#app{position:relative;z-index:1;max-width:600px;margin:0 auto;}
+
+/* ── HEADER ── */
+.hdr{display:flex;align-items:center;gap:12px;padding:20px 0 22px;}
+.hdr-stripe{
+  width:4px;height:40px;border-radius:4px;flex-shrink:0;
+  background:linear-gradient(180deg,var(--acc) 0%,var(--cyn) 100%);
+  box-shadow:0 0 16px var(--acc);
+}
+.hdr-title{font-size:20px;font-weight:900;color:var(--hi);letter-spacing:-.5px;}
+.hdr-sub{font-size:10px;color:var(--dim);letter-spacing:2px;margin-top:2px;text-transform:uppercase;}
+.add-btn{
+  margin-left:auto;background:transparent;border:1px solid var(--b2);
+  border-radius:8px;color:var(--acc);padding:8px 14px;
+  cursor:pointer;font:700 12px/1 'Outfit',sans-serif;letter-spacing:.5px;
+  transition:all .15s;
+}
+.add-btn:hover{background:var(--bg3);border-color:var(--acc);}
+
+/* ── CARD ── */
+.card{
+  background:var(--bg1);border:1px solid var(--b1);
+  border-radius:16px;padding:16px;margin-bottom:14px;
+  backdrop-filter:blur(8px);
+}
+
+/* ── SESSION TABS ── */
+.sess-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+.sess-tab{
+  background:var(--bg1);border:1px solid var(--b1);
+  border-radius:10px;padding:9px 14px;cursor:pointer;
+  display:flex;align-items:center;gap:7px;transition:all .15s;
+}
+.sess-tab.on{background:rgba(124,111,255,.12);border-color:var(--acc);}
+.tab-lbl{font-size:13px;font-weight:700;color:var(--dim);}
+.sess-tab.on .tab-lbl{color:var(--hi);}
+.dir-pill{font-size:10px;padding:2px 7px;border-radius:4px;font-weight:700;letter-spacing:.5px;}
+.dp-buy {background:var(--grn-bg);color:var(--grn);}
+.dp-sell{background:var(--red-bg);color:#ff8899;}
+.tab-x{color:var(--b2);font-size:15px;cursor:pointer;transition:color .1s;}
+.tab-x:hover{color:var(--red);}
+
+/* ── FORM ── */
+.flbl{font-size:10px;color:var(--acc);font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;}
+.fgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+.fgrid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;}
+input[type=text],input[type=number]{
+  width:100%;background:var(--bg2);border:1.5px solid var(--b2);border-radius:9px;
+  color:var(--hi);padding:10px 12px;font-size:13px;outline:none;
+  font-family:'JetBrains Mono',monospace;transition:border-color .15s;
+  -webkit-appearance:none;
+}
+input:focus{border-color:var(--acc);}
+input[type=number]{-moz-appearance:textfield;}
+input[type=number]::-webkit-inner-spin-button{display:none;}
+.dir-row{display:flex;gap:8px;margin-bottom:14px;}
+.dir-opt{
+  flex:1;padding:10px 8px;border-radius:9px;cursor:pointer;
+  font:700 12px/1 'Outfit',sans-serif;transition:all .15s;
+  border:1.5px solid var(--b2);background:var(--bg2);color:var(--dim);
+}
+.dir-opt.buy.on {background:var(--grn-bg);border-color:var(--grn);color:var(--grn);}
+.dir-opt.sell.on{background:var(--red-bg);border-color:#ff4466;color:#ff9999;}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+.chip{
+  background:var(--bg2);border:1px solid var(--b1);
+  border-radius:8px;padding:7px 12px;font-size:12px;
+}
+.chip-v{font-family:'JetBrains Mono',monospace;font-weight:700;}
+
+/* RSI level row */
+.rsi-row{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.rsi-label-wrap{flex:1;}
+.rsi-input-wrap{display:flex;align-items:center;gap:6px;}
+.rsi-input-wrap input{width:72px;text-align:center;}
+.rsi-hint{font-size:11px;color:var(--dim);}
+
+/* ── RUN BTN ── */
+.run-btn{
+  width:100%;padding:13px;border-radius:11px;border:none;
+  font:900 14px/1 'Outfit',sans-serif;letter-spacing:1px;cursor:pointer;
+  background:linear-gradient(135deg,var(--acc),var(--cyn));
+  color:#fff;transition:all .2s;
+  box-shadow:0 4px 20px rgba(124,111,255,.3);
+}
+.run-btn:disabled{background:var(--bg3);color:var(--dim);cursor:not-allowed;box-shadow:none;}
+.run-btn:not(:disabled):active{transform:scale(.98);}
+
+/* ── STATUS / ERROR ── */
+.status-box{background:var(--bg2);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--acc);display:flex;align-items:center;gap:8px;}
+.err-box{background:var(--red-bg);border:1px solid var(--red);border-radius:9px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--red);}
+
+/* ── COIN TABS ── */
+.coin-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+.coin-tab{
+  background:var(--bg1);border:1px solid var(--b1);
+  border-radius:10px;padding:9px 14px;cursor:pointer;transition:all .15s;
+}
+.coin-tab.on{background:rgba(124,111,255,.12);border-color:var(--acc);}
+.c-name{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:12px;color:var(--dim);}
+.coin-tab.on .c-name{color:var(--hi);}
+.c-wr{font-size:11px;margin-left:5px;}
+
+/* ── STAT CARDS ── */
+.stats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+.sc{background:var(--bg2);border:1px solid var(--b1);border-radius:11px;padding:11px 13px;min-width:80px;}
+.sc-lbl{font-size:9px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-bottom:5px;}
+.sc-val{font-size:21px;font-weight:800;font-family:'JetBrains Mono',monospace;}
+
+/* ── WIN BAR ── */
+.wbar-wrap{background:var(--bg2);border:1px solid var(--b1);border-radius:10px;padding:12px 14px;margin-bottom:14px;}
+.wbar-lbl{font-size:9px;color:var(--dim);letter-spacing:2px;margin-bottom:8px;}
+.wbar{display:flex;height:22px;border-radius:6px;overflow:hidden;}
+.ws{display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;}
+.ws-w{background:linear-gradient(90deg,#00f085,#00cc66);}
+.ws-l{background:linear-gradient(90deg,#cc1133,#ff3d55);}
+
+/* ── TABLE ── */
+.tbl-wrap{background:var(--bg1);border:1px solid var(--b1);border-radius:14px;overflow:hidden;margin-bottom:18px;}
+.tbl-hdr{padding:11px 15px;border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;}
+.tbl-title{font-size:11px;color:var(--acc);font-weight:700;letter-spacing:1px;}
+.tbl-cnt{font-size:11px;color:var(--dim);}
+.tbl-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+table{width:100%;border-collapse:collapse;}
+th{padding:8px 11px;text-align:left;color:var(--dim);font-size:11px;font-weight:600;border-bottom:1px solid var(--b1);background:var(--bg2);white-space:nowrap;}
+td{padding:8px 11px;border-bottom:1px solid #0c0c20;font-family:'JetBrains Mono',monospace;font-size:11px;white-space:nowrap;}
+tr:last-child td{border-bottom:none;}
+tr:nth-child(even) td{background:rgba(16,16,36,.6);}
+.badge{border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700;letter-spacing:1px;border-width:1px;border-style:solid;display:inline-block;}
+.bw{background:var(--grn-bg);color:var(--grn);border-color:var(--grn);}
+.bl{background:var(--red-bg);color:var(--red);border-color:var(--red);}
+.bo{background:#111;color:#666;border-color:#333;}
+.more-btn{
+  width:100%;padding:11px;border:none;background:none;cursor:pointer;
+  color:var(--acc);font:700 11px/1 'Outfit',sans-serif;letter-spacing:1px;
+  border-top:1px solid var(--b1);transition:background .15s;
+}
+.more-btn:hover{background:var(--bg2);}
+
+/* ── SUMMARY ── */
+.sum-wrap{background:var(--bg1);border:1px solid var(--b1);border-radius:14px;overflow:hidden;margin-bottom:18px;}
+.sum-title{padding:11px 15px;font-size:11px;color:var(--acc);font-weight:700;letter-spacing:1px;border-bottom:1px solid var(--b1);}
+
+/* ── EMPTY ── */
+.empty{text-align:center;padding:48px 20px;}
+.empty-ico{font-size:38px;margin-bottom:12px;}
+.empty-txt{font-size:14px;color:#444;line-height:1.6;}
+
+/* ── FOOTER ── */
+.footer{text-align:center;font-size:10px;color:#222;margin-top:16px;}
+
+@media(max-width:380px){
+  .fgrid{grid-template-columns:1fr;}
+  .fgrid3{grid-template-columns:1fr 1fr;}
+  .sc-val{font-size:18px;}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="hdr">
+    <div class="hdr-stripe"></div>
+    <div>
+      <div class="hdr-title">RSI Backtester</div>
+      <div class="hdr-sub">Binance · 1H · TP +3% / SL -1.5%</div>
+    </div>
+    <button class="add-btn" onclick="addSession()">+ Phiên</button>
+  </div>
+
+  <div id="sessTabs" class="sess-tabs"></div>
+  <div id="configCard" class="card"></div>
+  <div id="results"></div>
+
+  <div class="footer">⚠ Backtest chỉ mang tính tham khảo – không phải tư vấn đầu tư.</div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════
+let sid = 1, sessions = [mkSess(1)];
+let results = {}, errors = {}, statusMsg = '';
+let activeS = 1, activeC = null;
+let expanded = new Set(), loading = false;
+
+function mkSess(id){
+  return { id, label:'Phiên '+id,
+    coins:'BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT',
+    start:'13/04/2025', end:todayStr(),
+    dir:'buy', rsiLevel:50 };
+}
+function todayStr(){
+  const n=new Date();
+  return pad(n.getDate())+'/'+pad(n.getMonth()+1)+'/'+n.getFullYear();
+}
+function pad(n){return String(n).padStart(2,'0');}
+
+// ══════════════════════════════════════════════
+//  RSI
+// ══════════════════════════════════════════════
+function calcRSI(closes, period){
+  period = period||14;
+  const rsi = new Array(closes.length).fill(null);
+  if(closes.length < period+1) return rsi;
+  let g=0,l=0;
+  for(let i=1;i<=period;i++){const d=closes[i]-closes[i-1];d>0?g+=d:l-=d;}
+  let ag=g/period,al=l/period;
+  rsi[period]=al===0?100:100-100/(1+ag/al);
+  for(let i=period+1;i<closes.length;i++){
+    const d=closes[i]-closes[i-1];
+    ag=(ag*(period-1)+(d>0?d:0))/period;
+    al=(al*(period-1)+(d<0?-d:0))/period;
+    rsi[i]=al===0?100:100-100/(1+ag/al);
+  }
+  return rsi;
+}
+
+// ══════════════════════════════════════════════
+//  BACKTEST
+// ══════════════════════════════════════════════
+function backtest(candles, dir, startTs, endTs, rsiLevel){
+  const closes=candles.map(c=>parseFloat(c[4]));
+  const highs =candles.map(c=>parseFloat(c[2]));
+  const lows  =candles.map(c=>parseFloat(c[3]));
+  const times =candles.map(c=>c[0]);
+  const rsi   =calcRSI(closes);
+  const trades=[];
+
+  for(let i=16;i<candles.length-1;i++){
+    if(!rsi[i-1]||!rsi[i]) continue;
+    if(times[i]<startTs||times[i]>endTs) continue;
+    const sig = dir==='buy'
+      ? (rsi[i-1]<rsiLevel && rsi[i]>rsiLevel)
+      : (rsi[i-1]>rsiLevel && rsi[i]<rsiLevel);
+    if(!sig) continue;
+
+    const entry=closes[i];
+    const tp=dir==='buy'?entry*1.03:entry*0.97;
+    const sl=dir==='buy'?entry*0.985:entry*1.015;
+    let result='OPEN',pnl=null;
+
+    for(let j=i+1;j<candles.length;j++){
+      if(dir==='buy'){
+        if(highs[j]>=tp){result='WIN';pnl=3;break;}
+        if(lows[j]<=sl){result='LOSS';pnl=-1.5;break;}
+      } else {
+        if(lows[j]<=tp){result='WIN';pnl=3;break;}
+        if(highs[j]>=sl){result='LOSS';pnl=-1.5;break;}
+      }
+    }
+    const d=new Date(times[i]);
+    trades.push({
+      time:pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes()),
+      entry:entry>100?entry.toFixed(2):entry.toFixed(4),
+      rsi:rsi[i].toFixed(2), tp:tp>100?tp.toFixed(2):tp.toFixed(4),
+      sl:sl>100?sl.toFixed(2):sl.toFixed(4),
+      result, pnl
+    });
+  }
+  return trades;
+}
+
+function summarize(trades){
+  const wins=trades.filter(t=>t.result==='WIN').length;
+  const losses=trades.filter(t=>t.result==='LOSS').length;
+  const closed=wins+losses;
+  const totalPnl=trades.reduce((s,t)=>s+(t.pnl||0),0);
+  return {trades,wins,losses,closed,totalPnl};
+}
+
+// ══════════════════════════════════════════════
+//  FETCH BINANCE
+// ══════════════════════════════════════════════
+async function fetchKlines(symbol, startTs, endTs){
+  const all=[];let cur=startTs;
+  while(cur<endTs){
+    const url=`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&startTime=${cur}&endTime=${endTs}&limit=1000`;
+    const res=await fetch(url);
+    if(!res.ok) throw new Error(symbol+': HTTP '+res.status);
+    const chunk=await res.json();
+    if(!chunk.length) break;
+    all.push(...chunk);
+    setStatus('⏳ '+symbol+': tải '+all.length+' nến...');
+    if(chunk.length<1000) break;
+    cur=chunk[chunk.length-1][0]+1;
+  }
+  return all;
+}
+
+// ══════════════════════════════════════════════
+//  DATE PARSE  dd/mm/yyyy
+// ══════════════════════════════════════════════
+function parseDate(str,end){
+  const p=str.trim().split('/').map(Number);
+  if(p.length!==3||p.some(isNaN)) return null;
+  const[d,m,y]=p;
+  const base=Date.UTC(y<100?2000+y:y,m-1,d)-7*3600000;
+  return end?base+86400000-1:base;
+}
+
+// ══════════════════════════════════════════════
+//  ACTIONS
+// ══════════════════════════════════════════════
+function addSession(){
+  sid++;sessions.push(mkSess(sid));activeS=sid;render();
+}
+function removeSession(id){
+  if(sessions.length<=1) return;
+  sessions=sessions.filter(s=>s.id!==id);delete results[id];delete errors[id];
+  if(activeS===id) activeS=sessions[0].id;
+  render();
+}
+function setField(id,k,v){
+  const s=sessions.find(s=>s.id===id);
+  if(s){s[k]=v;renderConfig();}
+}
+function setStatus(msg){statusMsg=msg;const el=document.getElementById('statusLine');if(el)el.innerHTML=msg;}
+function clearStatus(){statusMsg='';const el=document.getElementById('statusLine');if(el)el.innerHTML='';}
+
+async function runSession(){
+  const session=sessions.find(s=>s.id===activeS);
+  if(!session||loading) return;
+
+  const startTs=parseDate(session.start,false);
+  const endTs  =parseDate(session.end,true);
+  const rsiLevel=parseFloat(session.rsiLevel)||50;
+
+  if(!startTs||!endTs){errors[activeS]='Ngày không hợp lệ (dd/mm/yyyy)';render();return;}
+  if(startTs>endTs){errors[activeS]='Ngày bắt đầu phải trước kết thúc';render();return;}
+  if(rsiLevel<1||rsiLevel>99){errors[activeS]='RSI Level phải từ 1–99';render();return;}
+
+  delete errors[activeS];
+  loading=true;render();
+
+  const syms=session.coins.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean).slice(0,5);
+  const res={};
+  try{
+    for(const sym of syms){
+      setStatus('⏳ '+sym+': đang kết nối Binance...');
+      const candles=await fetchKlines(sym,startTs,endTs);
+      res[sym]=summarize(backtest(candles,session.dir,startTs,endTs,rsiLevel));
+    }
+    results[activeS]=res;
+    activeC=syms[0];
+  } catch(e){
+    errors[activeS]=e.message;
+  }
+  loading=false;clearStatus();render();
+}
+
+// ══════════════════════════════════════════════
+//  RENDER
+// ══════════════════════════════════════════════
+function render(){renderTabs();renderConfig();renderResults();}
+
+function renderTabs(){
+  const el=document.getElementById('sessTabs');
+  el.innerHTML=sessions.map(s=>`
+    <div class="sess-tab ${s.id===activeS?'on':''}" onclick="activeS=${s.id};render()">
+      <span class="tab-lbl">${esc(s.label)}</span>
+      <span class="dir-pill dp-${s.dir}">${s.dir==='buy'?'▲ BUY':'▼ SELL'}</span>
+      ${sessions.length>1?`<span class="tab-x" onclick="event.stopPropagation();removeSession(${s.id})">✕</span>`:''}
+    </div>`).join('');
+}
+
+function renderConfig(){
+  const s=sessions.find(s=>s.id===activeS);if(!s) return;
+  const dir=s.dir;
+  const tpLabel = dir==='buy' ? '+3%' : '-3%';
+  const slLabel = dir==='buy' ? '-1.5%' : '+1.5%';
+
+  document.getElementById('configCard').innerHTML=`
+    <div style="margin-bottom:14px">
+      <div class="flbl">Tên phiên</div>
+      <input type="text" value="${esc(s.label)}" oninput="setField(${s.id},'label',this.value)" style="max-width:220px">
+    </div>
+    <div class="fgrid">
+      <div><div class="flbl">Từ ngày</div><input type="text" value="${esc(s.start)}" oninput="setField(${s.id},'start',this.value)" placeholder="13/04/2025"></div>
+      <div><div class="flbl">Đến ngày</div><input type="text" value="${esc(s.end)}"  oninput="setField(${s.id},'end',this.value)"   placeholder="${todayStr()}"></div>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <div class="flbl">Hướng tín hiệu RSI</div>
+      <div class="dir-row">
+        <button class="dir-opt buy ${dir==='buy'?'on':''}"  onclick="setField(${s.id},'dir','buy')">▲ Hất lên (BUY)</button>
+        <button class="dir-opt sell ${dir==='sell'?'on':''}" onclick="setField(${s.id},'dir','sell')">▼ Hất xuống (SELL)</button>
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <div class="flbl">Ngưỡng RSI cắt qua</div>
+      <div class="rsi-row">
+        <div class="rsi-label-wrap">
+          <div style="font-size:12px;color:var(--txt)">RSI(14) ${dir==='buy'?'cắt lên':'cắt xuống'} ngưỡng này</div>
+          <div class="rsi-hint">Mặc định 50 · Nhập từ 1–99</div>
+        </div>
+        <div class="rsi-input-wrap">
+          <input type="number" min="1" max="99" step="1" value="${s.rsiLevel}" oninput="setField(${s.id},'rsiLevel',this.value)">
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <div class="flbl">Danh sách coin (tối đa 5)</div>
+      <input type="text" value="${esc(s.coins)}" oninput="setField(${s.id},'coins',this.value)">
+    </div>
+
+    <div class="chips" style="margin-bottom:14px">
+      <div class="chip">Take Profit: <span class="chip-v" style="color:var(--grn)">${tpLabel}</span></div>
+      <div class="chip">Stop Loss: <span class="chip-v" style="color:var(--red)">${slLabel}</span></div>
+      <div class="chip">R:R <span class="chip-v" style="color:var(--dim)">1:2</span></div>
+      <div class="chip">RSI Level: <span class="chip-v" style="color:var(--acc)">${s.rsiLevel}</span></div>
+    </div>
+
+    ${statusMsg?`<div class="status-box" id="statusLine">${statusMsg}</div>`:'<div id="statusLine"></div>'}
+    ${errors[s.id]?`<div class="err-box">⚠ ${esc(errors[s.id])}</div>`:''}
+
+    <button class="run-btn" onclick="runSession()" ${loading?'disabled':''}>
+      ${loading?'⏳ Đang phân tích…':'▶ RUN BACKTEST'}
+    </button>`;
+}
+
+function renderResults(){
+  const el=document.getElementById('results');
+  const res=results[activeS];
+  const sess=sessions.find(s=>s.id===activeS);
+  if(!res){el.innerHTML='';return;}
+
+  const syms=Object.keys(res);
+  if(!activeC||!res[activeC]) activeC=syms[0];
+
+  // Coin tabs
+  let html=`<div class="coin-tabs">`;
+  syms.forEach(sym=>{
+    const d=res[sym];
+    const wr=d.closed>0?(d.wins/d.closed*100).toFixed(1):'—';
+    const wrColor=parseFloat(wr)>=50?'var(--grn)':'var(--ora)';
+    html+=`<div class="coin-tab ${sym===activeC?'on':''}" onclick="activeC='${sym}';renderResults()">
+      <span class="c-name">${sym.replace('USDT','')}</span>
+      <span class="c-wr" style="color:${wrColor}">WR ${wr}%</span>
+    </div>`;
+  });
+  html+='</div>';
+
+  const d=res[activeC];
+
+  // Stat cards
+  const wr=d.closed>0?(d.wins/d.closed*100).toFixed(1)+'%':'—';
+  const wrColor=d.closed>0&&d.wins/d.closed>=0.5?'var(--grn)':'var(--ora)';
+  const pnlColor=d.totalPnl>=0?'var(--grn)':'var(--red)';
+  const pnlStr=(d.totalPnl>=0?'+':'')+d.totalPnl.toFixed(2)+'%';
+  html+=`<div class="stats">
+    <div class="sc"><div class="sc-lbl">Tín hiệu</div><div class="sc-val">${d.trades.length}</div></div>
+    <div class="sc"><div class="sc-lbl">Đóng</div><div class="sc-val">${d.closed}</div></div>
+    <div class="sc"><div class="sc-lbl">Thắng</div><div class="sc-val" style="color:var(--grn)">${d.wins}</div></div>
+    <div class="sc"><div class="sc-lbl">Thua</div><div class="sc-val" style="color:var(--red)">${d.losses}</div></div>
+    <div class="sc"><div class="sc-lbl">Win Rate</div><div class="sc-val" style="color:${wrColor}">${wr}</div></div>
+    <div class="sc"><div class="sc-lbl">Tổng PnL</div><div class="sc-val" style="color:${pnlColor}">${pnlStr}</div></div>
+  </div>`;
+
+  // Win bar
+  if(d.closed>0){
+    const wp=d.wins/d.closed*100, lp=d.losses/d.closed*100;
+    html+=`<div class="wbar-wrap">
+      <div class="wbar-lbl">WIN / LOSS RATIO</div>
+      <div class="wbar">
+        <div class="ws ws-w" style="width:${wp}%">${d.wins>0?'WIN '+d.wins:''}</div>
+        <div class="ws ws-l" style="width:${lp}%;color:#fff">${d.losses>0?'LOSS '+d.losses:''}</div>
+      </div>
+    </div>`;
+  }
+
+  // Trade table
+  const expKey=activeS+'-'+activeC;
+  const showAll=expanded.has(expKey);
+  const trades=showAll?d.trades:d.trades.slice(0,30);
+  const rsiLvl=sess?sess.rsiLevel:50;
+
+  html+=`<div class="tbl-wrap">
+    <div class="tbl-hdr">
+      <span class="tbl-title">${activeC} · ${sess?sess.dir.toUpperCase():''} · RSI cắt ${rsiLvl}</span>
+      <span class="tbl-cnt">${d.trades.length} tín hiệu</span>
+    </div>
+    <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>#</th><th>Thời gian</th><th>Giá vào</th><th>RSI</th><th>TP</th><th>SL</th><th>PnL</th><th>KQ</th></tr></thead>
+      <tbody>`;
+  trades.forEach((t,i)=>{
+    const pnlStr=t.pnl===null?'—':(t.pnl>0?'+':'')+t.pnl+'%';
+    const pnlColor=t.pnl===null?'var(--dim)':t.pnl>0?'var(--grn)':'var(--red)';
+    const badge=t.result==='WIN'?'bw':t.result==='LOSS'?'bl':'bo';
+    html+=`<tr>
+      <td style="color:var(--dim)">${i+1}</td>
+      <td style="color:var(--dim)">${t.time}</td>
+      <td>${t.entry}</td>
+      <td style="color:var(--acc)">${t.rsi}</td>
+      <td style="color:var(--grn)">${t.tp}</td>
+      <td style="color:var(--red)">${t.sl}</td>
+      <td style="color:${pnlColor};font-weight:700">${pnlStr}</td>
+      <td><span class="badge ${badge}">${t.result}</span></td>
+    </tr>`;
+  });
+  html+=`</tbody></table></div>`;
+  if(d.trades.length>30){
+    html+=`<button class="more-btn" onclick="toggleExpand('${expKey}')">
+      ${showAll?'▲ THU GỌN':'▼ XEM THÊM '+(d.trades.length-30)+' GIAO DỊCH'}
+    </button>`;
+  }
+  html+='</div>';
+
+  // Summary all coins
+  html+=`<div class="sum-wrap">
+    <div class="sum-title">TỔNG KẾT TẤT CẢ COIN — ${sess?esc(sess.label):''}</div>
+    <div class="tbl-scroll"><table class="summary-table">
+      <thead><tr><th>Coin</th><th>TH</th><th>Đóng</th><th>WIN</th><th>LOSS</th><th>Win Rate</th><th>PnL</th></tr></thead>
+      <tbody>`;
+  syms.forEach(sym=>{
+    const sd=res[sym];
+    const wr2=sd.closed>0?(sd.wins/sd.closed*100).toFixed(1)+'%':'—';
+    const wrc=parseFloat(wr2)>=50?'var(--grn)':'var(--ora)';
+    const pnl2=(sd.totalPnl>=0?'+':'')+sd.totalPnl.toFixed(2)+'%';
+    const pc=sd.totalPnl>=0?'var(--grn)':'var(--red)';
+    html+=`<tr>
+      <td class="sym">${sym}</td><td>${sd.trades.length}</td><td>${sd.closed}</td>
+      <td style="color:var(--grn);font-weight:700">${sd.wins}</td>
+      <td style="color:var(--red);font-weight:700">${sd.losses}</td>
+      <td style="color:${wrc};font-weight:700">${wr2}</td>
+      <td style="color:${pc};font-weight:700">${pnl2}</td>
+    </tr>`;
+  });
+  html+=`</tbody></table></div></div>`;
+
+  el.innerHTML=html;
+}
+
+function toggleExpand(key){
+  if(expanded.has(key)) expanded.delete(key); else expanded.add(key);
+  renderResults();
+}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+// init
+render();
+</script>
+</body>
+</html>
