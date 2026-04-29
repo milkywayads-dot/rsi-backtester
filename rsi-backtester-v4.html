@@ -192,10 +192,25 @@ tr:nth-child(even) td{background:rgba(16,16,36,.6);}
 /* ── FOOTER ── */
 .footer{text-align:center;font-size:10px;color:#222;margin-top:16px;}
 
+/* ── OPTIMIZER ── */
+.opt-card{background:linear-gradient(135deg,rgba(124,111,255,.08),rgba(0,207,255,.05));border:1px solid var(--acc);border-radius:16px;padding:16px;margin-bottom:14px;}
+.opt-title{font-size:13px;font-weight:900;color:var(--acc);letter-spacing:1px;margin-bottom:4px;}
+.opt-sub{font-size:11px;color:var(--dim);margin-bottom:14px;}
+.opt-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+.opt-run{width:100%;padding:12px;border-radius:10px;border:none;font:800 13px/1 'Outfit',sans-serif;letter-spacing:1px;cursor:pointer;background:linear-gradient(135deg,#7c6fff,#00cfff);color:#fff;transition:all .2s;box-shadow:0 4px 20px rgba(124,111,255,.3);}
+.opt-run:disabled{background:var(--bg3);color:var(--dim);cursor:not-allowed;box-shadow:none;}
+.opt-progress{background:var(--bg2);border-radius:8px;overflow:hidden;height:6px;margin-bottom:10px;}
+.opt-bar{height:100%;background:linear-gradient(90deg,var(--acc),var(--cyn));transition:width .1s;}
+.opt-result-wrap{background:var(--bg1);border:1px solid var(--b1);border-radius:12px;overflow:hidden;margin-top:14px;}
+.opt-result-hdr{padding:11px 15px;border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;}
+.sort-btn{background:var(--bg2);border:1px solid var(--b1);border-radius:6px;color:var(--dim);padding:4px 10px;font-size:11px;cursor:pointer;font-family:inherit;}
+.sort-btn.on{border-color:var(--acc);color:var(--acc);}
+
 @media(max-width:380px){
   .fgrid{grid-template-columns:1fr;}
   .fgrid3{grid-template-columns:1fr 1fr;}
   .sc-val{font-size:18px;}
+  .opt-grid{grid-template-columns:1fr;}
 }
 </style>
 </head>
@@ -213,6 +228,9 @@ tr:nth-child(even) td{background:rgba(16,16,36,.6);}
   <div id="sessTabs" class="sess-tabs"></div>
   <div id="configCard" class="card"></div>
   <div id="results"></div>
+
+  <!-- ── OPTIMIZER SECTION ── -->
+  <div id="optimizerSection" style="margin-top:8px;"></div>
 
   <div class="footer">⚠ Backtest chỉ mang tính tham khảo – không phải tư vấn đầu tư.</div>
 </div>
@@ -882,8 +900,223 @@ function toggleExpand(key){
 }
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
+// ══════════════════════════════════════════════
+//  OPTIMIZER STATE
+// ══════════════════════════════════════════════
+let optState = {
+  coin: 'BTCUSDT',
+  start: '01/01/2025',
+  end: todayStr(),
+  minTrades: 50,
+  minWR: 50,
+  singleMode: true,
+  sortBy: 'pnl',   // 'pnl' | 'wr' | 'trades'
+  running: false,
+  progress: 0,
+  total: 0,
+  results: [],
+  statusMsg: ''
+};
+
+const OPT_RSI    = [35, 40, 45, 50, 55, 60, 65];
+const OPT_TP     = [1, 1.5, 2, 2.5, 3, 4, 5];
+const OPT_SL     = [0.5, 1, 1.5, 2, 2.5, 3];
+const OPT_DIRS   = ['buy','sell'];
+
+async function runOptimizer(){
+  if(optState.running) return;
+  const startTs = parseDate(optState.start, false);
+  const endTs   = parseDate(optState.end, true);
+  if(!startTs||!endTs){ alert('Ngày không hợp lệ'); return; }
+
+  optState.running=true; optState.results=[]; optState.progress=0;
+  const combos = OPT_RSI.length * OPT_TP.length * OPT_SL.length * OPT_DIRS.length;
+  optState.total = combos;
+  optState.statusMsg = `Đang tải dữ liệu ${optState.coin}...`;
+  renderOptimizer();
+
+  let candles;
+  try {
+    candles = await fetchKlines(optState.coin, startTs, endTs);
+  } catch(e) {
+    optState.statusMsg = '❌ Lỗi: ' + e.message;
+    optState.running = false;
+    renderOptimizer(); return;
+  }
+
+  optState.statusMsg = `Đang thử ${combos} tổ hợp...`;
+  renderOptimizer();
+
+  // Chạy tất cả tổ hợp (sync, rất nhanh)
+  const res = [];
+  let done = 0;
+  for(const dir of OPT_DIRS){
+    for(const rsi of OPT_RSI){
+      for(const tp of OPT_TP){
+        for(const sl of OPT_SL){
+          const trades = backtest(candles, dir, startTs, endTs, rsi, tp, sl, optState.singleMode);
+          const sum    = summarize(trades);
+          const wr     = sum.closed>0 ? sum.wins/sum.closed*100 : 0;
+          if(sum.closed >= optState.minTrades && wr >= optState.minWR){
+            res.push({ dir, rsi, tp, sl,
+              trades: sum.closed, wins: sum.wins, losses: sum.losses,
+              wr: parseFloat(wr.toFixed(1)), pnl: parseFloat(sum.totalPnl.toFixed(2)) });
+          }
+          done++;
+          // Update progress mỗi 50 combo
+          if(done % 50 === 0){
+            optState.progress = done;
+            renderOptimizerProgress();
+          }
+        }
+      }
+    }
+  }
+
+  // Sort
+  res.sort((a,b) => b[optState.sortBy==='wr'?'wr':optState.sortBy==='trades'?'trades':'pnl']
+                  - a[optState.sortBy==='wr'?'wr':optState.sortBy==='trades'?'trades':'pnl']);
+
+  optState.results  = res;
+  optState.progress = combos;
+  optState.running  = false;
+  optState.statusMsg = `✅ Xong! ${combos} tổ hợp → tìm được ${res.length} thỏa điều kiện`;
+  renderOptimizer();
+}
+
+function setOptSort(by){
+  optState.sortBy = by;
+  const res = optState.results;
+  res.sort((a,b)=> b[by==='wr'?'wr':by==='trades'?'trades':'pnl']
+                 - a[by==='wr'?'wr':by==='trades'?'trades':'pnl']);
+  optState.results = res;
+  renderOptimizer();
+}
+
+function renderOptimizerProgress(){
+  const bar = document.getElementById('optBar');
+  const pct = document.getElementById('optPct');
+  if(bar) bar.style.width = (optState.progress/optState.total*100)+'%';
+  if(pct) pct.textContent = Math.round(optState.progress/optState.total*100)+'%';
+}
+
+function renderOptimizer(){
+  const el = document.getElementById('optimizerSection');
+  if(!el) return;
+  const o = optState;
+
+  let html = `<div class="opt-card">
+    <div class="opt-title">🔍 AUTO OPTIMIZER</div>
+    <div class="opt-sub">Thử tự động ${OPT_RSI.length}×${OPT_TP.length}×${OPT_SL.length}×2 = ${OPT_RSI.length*OPT_TP.length*OPT_SL.length*2} tổ hợp · Tìm WinRate ≥ mục tiêu</div>
+
+    <div class="opt-grid">
+      <div><div class="flbl">Coin</div>
+        <input type="text" value="${esc(o.coin)}"
+          oninput="optState.coin=this.value.trim().toUpperCase()"
+          style="font-family:monospace">
+      </div>
+      <div><div class="flbl">Số lệnh tối thiểu</div>
+        <input type="number" min="10" max="9999" value="${o.minTrades}"
+          oninput="optState.minTrades=parseInt(this.value)||50">
+      </div>
+      <div><div class="flbl">Từ ngày</div>
+        <input type="text" value="${esc(o.start)}"
+          oninput="optState.start=this.value">
+      </div>
+      <div><div class="flbl">Đến ngày</div>
+        <input type="text" value="${esc(o.end)}"
+          oninput="optState.end=this.value">
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:8px;flex:1;">
+        <div style="font-size:11px;color:var(--dim);">Win Rate mục tiêu ≥</div>
+        <input type="number" min="1" max="100" value="${o.minWR}"
+          oninput="optState.minWR=parseFloat(this.value)||50"
+          style="width:64px;text-align:center;background:var(--bg2);border:2px solid var(--acc);
+                 border-radius:8px;color:var(--acc);padding:7px 4px;font-size:18px;font-weight:800;
+                 outline:none;font-family:'JetBrains Mono',monospace;">
+        <div style="font-size:18px;font-weight:800;color:var(--acc);">%</div>
+      </div>
+      <div class="toggle-row ${o.singleMode?'on':''}"
+        style="flex:1;margin-bottom:0;padding:8px 12px;"
+        onclick="optState.singleMode=!optState.singleMode;renderOptimizer()">
+        <div class="toggle-info">
+          <div style="font-size:12px;font-weight:700;color:var(--txt);">1 lệnh / thời điểm</div>
+        </div>
+        <div class="toggle-sw ${o.singleMode?'on':''}"></div>
+      </div>
+    </div>
+
+    ${o.running ? `
+    <div style="margin-bottom:8px;font-size:11px;color:var(--acc);display:flex;justify-content:space-between;">
+      <span>${o.statusMsg}</span><span id="optPct">0%</span>
+    </div>
+    <div class="opt-progress"><div class="opt-bar" id="optBar" style="width:0%"></div></div>
+    ` : `
+    ${o.statusMsg?`<div style="font-size:11px;color:${o.statusMsg.includes('❌')?'var(--red)':'var(--grn)'};margin-bottom:10px;">${o.statusMsg}</div>`:''}
+    <button class="opt-run" onclick="runOptimizer()">🔍 TÌM THAM SỐ TỐI ƯU</button>
+    `}
+
+    ${o.results.length>0 ? `
+    <div class="opt-result-wrap">
+      <div class="opt-result-hdr">
+        <span style="font-size:11px;color:var(--acc);font-weight:700;letter-spacing:1px;">
+          TOP KẾT QUẢ — ${esc(o.coin)} · ${o.results.length} tổ hợp thỏa điều kiện
+        </span>
+        <div style="display:flex;gap:6px;">
+          <span style="font-size:10px;color:var(--dim);align-self:center;">Sắp xếp:</span>
+          <button class="sort-btn ${o.sortBy==='pnl'?'on':''}" onclick="setOptSort('pnl')">PnL</button>
+          <button class="sort-btn ${o.sortBy==='wr'?'on':''}"  onclick="setOptSort('wr')">WinRate</button>
+          <button class="sort-btn ${o.sortBy==='trades'?'on':''}" onclick="setOptSort('trades')">Lệnh</button>
+        </div>
+      </div>
+      <div class="tbl-scroll">
+      <table>
+        <thead><tr>
+          <th>#</th><th>Hướng</th><th>RSI</th><th>TP%</th><th>SL%</th><th>R:R</th>
+          <th>Lệnh</th><th>WIN</th><th>LOSS</th><th>WinRate</th><th>PnL</th>
+        </tr></thead>
+        <tbody>
+        ${o.results.slice(0,50).map((r,i)=>{
+          const rr = (r.tp/r.sl).toFixed(1);
+          const wrc= r.wr>=55?'var(--grn)':r.wr>=50?'var(--ora)':'var(--red)';
+          const pc = r.pnl>=0?'var(--grn)':'var(--red)';
+          const dc = r.dir==='buy'?'var(--grn)':'#ff8899';
+          return `<tr>
+            <td style="color:var(--dim)">${i+1}</td>
+            <td style="color:${dc};font-weight:700">${r.dir==='buy'?'▲ BUY':'▼ SELL'}</td>
+            <td style="color:var(--acc)">${r.rsi}</td>
+            <td style="color:var(--grn)">+${r.tp}%</td>
+            <td style="color:var(--red)">-${r.sl}%</td>
+            <td style="color:var(--dim)">${rr}</td>
+            <td>${r.trades}</td>
+            <td style="color:var(--grn);font-weight:700">${r.wins}</td>
+            <td style="color:var(--red);font-weight:700">${r.losses}</td>
+            <td style="color:${wrc};font-weight:800">${r.wr}%</td>
+            <td style="color:${pc};font-weight:800">${r.pnl>=0?'+':''}${r.pnl}%</td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table>
+      </div>
+      ${o.results.length>50?`<div style="padding:10px;text-align:center;font-size:11px;color:var(--dim);">Hiển thị 50/${o.results.length} kết quả tốt nhất</div>`:''}
+    </div>
+    ` : (!o.running && o.statusMsg.includes('✅') ? `
+    <div style="margin-top:12px;text-align:center;padding:20px;color:var(--dim);font-size:13px;">
+      ⚠ Không tìm thấy tổ hợp nào thỏa điều kiện.<br>
+      <span style="font-size:11px;">Thử giảm Win Rate mục tiêu hoặc số lệnh tối thiểu.</span>
+    </div>` : '')}
+  </div>`;
+
+  el.innerHTML = html;
+}
+
+// ══════════════════════════════════════════════
 // init
 render();
+renderOptimizer();
 </script>
 </body>
 </html>
