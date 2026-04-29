@@ -327,7 +327,7 @@ function summarize(trades){
 // ══════════════════════════════════════════════
 //  BACKTEST REVERSE — đảo chiều khi 5 lệnh LOSS > WIN
 // ══════════════════════════════════════════════
-function backtestReverse(candles, startDir, startTs, endTs, rsiLevel, tpPct, slPct){
+function backtestReverse(candles, startDir, startTs, endTs, rsiLevel, tpPct, slPct, singleMode){
   const closes=candles.map(c=>parseFloat(c[4]));
   const highs =candles.map(c=>parseFloat(c[2]));
   const lows  =candles.map(c=>parseFloat(c[3]));
@@ -349,7 +349,7 @@ function backtestReverse(candles, startDir, startTs, endTs, rsiLevel, tpPct, slP
   let flipCount=0;
 
   for(let i=16;i<candles.length-1;i++){
-    if(i<=lastCloseBar) continue;
+    if(singleMode && i<=lastCloseBar) continue;
     if(sigs[i]!==curDir) continue;
 
     const entry=closes[i];
@@ -366,7 +366,7 @@ function backtestReverse(candles, startDir, startTs, endTs, rsiLevel, tpPct, slP
         if(highs[j]>=sl){result='LOSS';pnl=-slPct;exitBar=j;break;}
       }
     }
-    lastCloseBar=exitBar>0?exitBar:candles.length;
+    if(singleMode) lastCloseBar=exitBar>0?exitBar:candles.length;
 
     const d=new Date(times[i]);
     trades.push({
@@ -471,9 +471,11 @@ async function runSession(){
         const rv=backtestReverse(candles,session.dir,startTs,endTs,
           parseFloat(session.rsiLevel)||50,
           parseFloat(session.tp)||3,
-          parseFloat(session.sl)||1.5);
+          parseFloat(session.sl)||1.5,
+          session.singleMode);
         revRes[sym]=summarize(rv.trades);
         revRes[sym].flipCount=rv.flipCount;
+        revRes[sym].singleRef=res[sym]; // so sánh với original cùng config
       }
     }
     results[activeS]=res;
@@ -711,7 +713,8 @@ function renderResults(){
   const revRes=revResults[activeS];
   if(revRes && revRes[activeC]){
     const rv=revRes[activeC];
-    const d2=res[activeC];
+    // So sánh công bằng: dùng bản SINGLE của original (reverse luôn là SINGLE)
+    const d2=rv.singleRef||res[activeC];
     const wr1=d2.closed>0?(d2.wins/d2.closed*100).toFixed(1):'—';
     const wr2=rv.closed>0?(rv.wins/rv.closed*100).toFixed(1):'—';
     const pnl1=d2.totalPnl, pnl2=rv.totalPnl;
