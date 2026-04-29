@@ -909,8 +909,9 @@ let optState = {
   end: todayStr(),
   minTrades: 50,
   minWR: 50,
+  minPnl: 0,
   singleMode: true,
-  sortBy: 'pnl',   // 'pnl' | 'wr' | 'trades'
+  sortBy: 'pnl',
   running: false,
   progress: 0,
   total: 0,
@@ -957,7 +958,7 @@ async function runOptimizer(){
           const trades = backtest(candles, dir, startTs, endTs, rsi, tp, sl, optState.singleMode);
           const sum    = summarize(trades);
           const wr     = sum.closed>0 ? sum.wins/sum.closed*100 : 0;
-          if(sum.closed >= optState.minTrades && wr >= optState.minWR){
+          if(sum.closed >= optState.minTrades && wr >= optState.minWR && sum.totalPnl >= optState.minPnl){
             res.push({ dir, rsi, tp, sl,
               trades: sum.closed, wins: sum.wins, losses: sum.losses,
               wr: parseFloat(wr.toFixed(1)), pnl: parseFloat(sum.totalPnl.toFixed(2)) });
@@ -1039,14 +1040,24 @@ function renderOptimizer(){
                  outline:none;font-family:'JetBrains Mono',monospace;">
         <div style="font-size:18px;font-weight:800;color:var(--acc);">%</div>
       </div>
-      <div class="toggle-row ${o.singleMode?'on':''}"
-        style="flex:1;margin-bottom:0;padding:8px 12px;"
-        onclick="optState.singleMode=!optState.singleMode;renderOptimizer()">
-        <div class="toggle-info">
-          <div style="font-size:12px;font-weight:700;color:var(--txt);">1 lệnh / thời điểm</div>
-        </div>
-        <div class="toggle-sw ${o.singleMode?'on':''}"></div>
+      <div style="display:flex;align-items:center;gap:8px;flex:1;">
+        <div style="font-size:11px;color:var(--dim);">PnL tối thiểu ≥</div>
+        <input type="number" min="-999" max="99999" step="10" value="${o.minPnl}"
+          oninput="optState.minPnl=parseFloat(this.value)||0"
+          style="width:80px;text-align:center;background:var(--bg2);border:2px solid var(--grn);
+                 border-radius:8px;color:var(--grn);padding:7px 4px;font-size:18px;font-weight:800;
+                 outline:none;font-family:'JetBrains Mono',monospace;">
+        <div style="font-size:18px;font-weight:800;color:var(--grn);">%</div>
       </div>
+    </div>
+    <div class="toggle-row ${o.singleMode?'on':''}"
+      style="margin-bottom:14px;"
+      onclick="optState.singleMode=!optState.singleMode;renderOptimizer()">
+      <div class="toggle-info">
+        <div style="font-size:12px;font-weight:700;color:var(--txt);">1 lệnh / thời điểm</div>
+        <div style="font-size:11px;color:var(--dim);margin-top:2px;">${o.singleMode?'✅ Sát thực tế nhất':'⚠️ Cho phép lệnh chồng nhau'}</div>
+      </div>
+      <div class="toggle-sw ${o.singleMode?'on':''}"></div>
     </div>
 
     ${o.running ? `
