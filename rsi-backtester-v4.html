@@ -231,7 +231,7 @@ function mkSess(id){
     coins:'BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT',
     start:'13/04/2025', end:todayStr(),
     dir:'buy', rsiLevel:50,
-    tp:3, sl:1.5, singleMode:true, reverseMode:false };
+    tp:3, sl:1.5, singleMode:true, reverseMode:false, flipWindow:5 };
 }
 function todayStr(){
   const n=new Date();
@@ -327,7 +327,8 @@ function summarize(trades){
 // ══════════════════════════════════════════════
 //  BACKTEST REVERSE — đảo chiều khi 5 lệnh LOSS > WIN
 // ══════════════════════════════════════════════
-function backtestReverse(candles, startDir, startTs, endTs, rsiLevel, tpPct, slPct, singleMode){
+function backtestReverse(candles, startDir, startTs, endTs, rsiLevel, tpPct, slPct, singleMode, flipWindow){
+  flipWindow = parseInt(flipWindow)||5;
   const closes=candles.map(c=>parseFloat(c[4]));
   const highs =candles.map(c=>parseFloat(c[2]));
   const lows  =candles.map(c=>parseFloat(c[3]));
@@ -379,8 +380,8 @@ function backtestReverse(candles, startDir, startTs, endTs, rsiLevel, tpPct, slP
     // Check 5 lệnh cùng hướng liên tiếp từ lần flip gần nhất → LOSS > WIN thì đảo
     if(result!=='OPEN'){
       const tradesAfterFlip=trades.slice(lastFlipIdx).filter(t=>t.result!=='OPEN'&&t.dir===curDir);
-      const last5=tradesAfterFlip.slice(-5);
-      if(last5.length===5){
+      const last5=tradesAfterFlip.slice(-flipWindow);
+      if(last5.length===flipWindow){
         const w5=last5.filter(t=>t.result==='WIN').length;
         const l5=last5.filter(t=>t.result==='LOSS').length;
         if(l5>w5){
@@ -474,7 +475,8 @@ async function runSession(){
           parseFloat(session.rsiLevel)||50,
           parseFloat(session.tp)||3,
           parseFloat(session.sl)||1.5,
-          session.singleMode);
+          session.singleMode,
+          parseInt(session.flipWindow)||5);
         revRes[sym]=summarize(rv.trades);
         revRes[sym].flipCount=rv.flipCount;
         revRes[sym].singleRef=res[sym]; // so sánh với original cùng config
@@ -575,13 +577,26 @@ function renderConfig(){
 
     <div class="toggle-row ${s.reverseMode?'on':''}" onclick="setField(${s.id},'reverseMode',!sessions.find(x=>x.id===${s.id}).reverseMode)">
       <div class="toggle-info">
-        <div class="toggle-title">Đảo chiều theo 5 lệnh</div>
+        <div class="toggle-title">Đảo chiều theo lệnh liên tiếp cùng chiều</div>
         <div class="toggle-desc">${s.reverseMode
-          ? '✅ Tự đảo BUY↔SELL khi 5 lệnh gần nhất LOSS > WIN — hiện thống kê riêng bên dưới'
-          : '⭕ Bật để mô phỏng chiến lược đảo chiều động theo 5 lệnh gần nhất'}</div>
+          ? '✅ Tự đảo BUY↔SELL khi LOSS > WIN — hiện thống kê riêng bên dưới'
+          : '⭕ Bật để mô phỏng chiến lược đảo chiều động'}</div>
       </div>
       <div class="toggle-sw ${s.reverseMode?'on':''}"></div>
     </div>
+
+    ${s.reverseMode ? `
+    <div style="background:rgba(0,207,255,.06);border:1.5px solid var(--cyn);border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:14px;">
+      <div style="flex:1;">
+        <div style="font-size:11px;color:var(--cyn);font-weight:700;letter-spacing:1px;margin-bottom:3px;">SỐ LỆNH CÙNG CHIỀU ĐỂ XÉT ĐẢO</div>
+        <div style="font-size:11px;color:var(--dim);">Khi đủ N lệnh cùng BUY hoặc SELL có LOSS > WIN → đảo chiều</div>
+      </div>
+      <input type="number" min="2" max="20" step="1" value="${s.flipWindow}"
+        oninput="setField(${s.id},'flipWindow',parseInt(this.value)||5)"
+        style="width:64px;text-align:center;background:var(--bg2);border:2px solid var(--cyn);border-radius:10px;
+               color:var(--cyn);padding:8px 4px;font-size:22px;font-weight:800;outline:none;
+               font-family:'JetBrains Mono',monospace;flex-shrink:0;">
+    </div>` : ''}
 
     <div class="chips" style="margin-bottom:14px">
       <div class="chip">TP: <span class="chip-v" style="color:var(--grn)">${tpSign}${tpPct}%</span></div>
