@@ -347,6 +347,7 @@ function backtestReverse(candles, startDir, startTs, endTs, rsiLevel, tpPct, slP
   let curDir=startDir;
   let lastCloseBar=-1;
   let flipCount=0;
+  let lastFlipIdx=0; // reset đếm sau mỗi lần flip
 
   for(let i=16;i<candles.length-1;i++){
     if(singleMode && i<=lastCloseBar) continue;
@@ -375,16 +376,17 @@ function backtestReverse(candles, startDir, startTs, endTs, rsiLevel, tpPct, slP
       rsi:rsi[i].toFixed(2), dir:curDir, result, pnl
     });
 
-    // Check 5 lệnh cùng hướng liên tiếp → đảo chiều nếu LOSS > WIN
+    // Check 5 lệnh cùng hướng liên tiếp từ lần flip gần nhất → LOSS > WIN thì đảo
     if(result!=='OPEN'){
-      const sameDirTrades=trades.filter(t=>t.result!=='OPEN' && t.dir===curDir);
-      const last5=sameDirTrades.slice(-5);
+      const tradesAfterFlip=trades.slice(lastFlipIdx).filter(t=>t.result!=='OPEN'&&t.dir===curDir);
+      const last5=tradesAfterFlip.slice(-5);
       if(last5.length===5){
         const w5=last5.filter(t=>t.result==='WIN').length;
         const l5=last5.filter(t=>t.result==='LOSS').length;
         if(l5>w5){
           curDir=curDir==='buy'?'sell':'buy';
           flipCount++;
+          lastFlipIdx=trades.length; // reset: chỉ đếm từ đây
         }
       }
     }
