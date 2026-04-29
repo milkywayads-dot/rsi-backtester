@@ -381,14 +381,17 @@ function backtestReverse(candles, startDir, startTs, endTs, rsiLevel, tpPct, slP
     if(result!=='OPEN'){
       const tradesAfterFlip=trades.slice(lastFlipIdx).filter(t=>t.result!=='OPEN'&&t.dir===curDir);
       const lastN=tradesAfterFlip.slice(-flipWindow);
-      if(lastN.length>=2){ // cần ít nhất 2 lệnh để xét tỷ lệ
-        const w5=lastN.filter(t=>t.result==='WIN').length;
-        const l5=lastN.filter(t=>t.result==='LOSS').length;
-        if(l5>w5){
-          curDir=curDir==='buy'?'sell':'buy';
-          flipCount++;
-          lastFlipIdx=trades.length; // reset: chỉ đếm từ đây
-        }
+      const w5=lastN.filter(t=>t.result==='WIN').length;
+      const l5=lastN.filter(t=>t.result==='LOSS').length;
+      // N<=2: chỉ cần 1 lệnh LOSS là đảo (vì không thể loss>win với N<=2)
+      // N>=3: cần đủ ít nhất 2 lệnh và LOSS > WIN mới đảo
+      const shouldFlip = flipWindow<=2
+        ? l5>=1
+        : (lastN.length>=2 && l5>w5);
+      if(shouldFlip){
+        curDir=curDir==='buy'?'sell':'buy';
+        flipCount++;
+        lastFlipIdx=trades.length;
       }
     }
   }
