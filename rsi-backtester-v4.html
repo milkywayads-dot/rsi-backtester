@@ -280,12 +280,12 @@ function calcRSI(closes, period){
 // ══════════════════════════════════════════════
 //  BACKTEST
 // ══════════════════════════════════════════════
-function backtest(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, singleMode){
+function backtest(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, singleMode, rsiPeriod){
   const closes=candles.map(c=>parseFloat(c[4]));
   const highs =candles.map(c=>parseFloat(c[2]));
   const lows  =candles.map(c=>parseFloat(c[3]));
   const times =candles.map(c=>c[0]);
-  const rsi   =calcRSI(closes);
+  const rsi   =calcRSI(closes, rsiPeriod||14);
   const trades=[];
   let lastCloseBar=-1; // bar index khi lệnh trước đóng
 
@@ -919,10 +919,91 @@ let optState = {
   statusMsg: ''
 };
 
-const OPT_RSI    = [35, 40, 45, 50, 55, 60, 65];
-const OPT_TP     = [1, 1.5, 2, 2.5, 3, 4, 5];
-const OPT_SL     = [0.5, 1, 1.5, 2, 2.5, 3];
-const OPT_DIRS   = ['buy','sell'];
+const OPT_RSI         = [35, 40, 45, 50, 55, 60, 65];
+const OPT_TP          = [1, 1.5, 2, 2.5, 3, 4, 5];
+const OPT_SL          = [0.5, 1, 1.5, 2, 2.5, 3];
+const OPT_DIRS        = ['buy','sell'];
+const OPT_RSI_PERIODS = [7, 10, 14, 21];
+const OPT_MACD_MODES  = ['none','macd'];
+
+// ── MACD helpers ──────────────────────────────
+function calcEMA(values, period){
+  const k=2/(period+1);
+  const ema=new Array(values.length).fill(null);
+  ema[0]=values[0];
+  for(let i=1;i<values.length;i++) ema[i]=values[i]*k+ema[i-1]*(1-k);
+  return ema;
+}
+function buildMacdMap(candles1D){
+  const closes=candles1D.map(c=>parseFloat(c[4]));
+  const times =candles1D.map(c=>c[0]);
+  const ema12=calcEMA(closes,12);
+  const ema26=calcEMA(closes,26);
+  const diff =closes.map((_,i)=>ema12[i]-ema26[i]);
+  const dea  =calcEMA(diff,9);
+  const hist =diff.map((d,i)=>d-dea[i]);
+  const map=new Map();
+  for(let i=0;i<times.length;i++){
+    const dayKey=Math.floor((times[i]+7*3600000)/86400000);
+    map.set(dayKey, hist[i]);
+  }
+  return map;
+}
+function getMacdHist(macdMap, tsMs){
+  const dayKey=Math.floor((tsMs+7*3600000)/86400000);
+  return macdMap.get(dayKey)??null;
+}
+
+// ── backtestWithMacd: giống backtest nhưng filter MACD 1D ──
+function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, singleMode, rsiPeriod, macdMap){
+  const closes=candles.map(c=>parseFloat(c[4]));
+  const highs =candles.map(c=>parseFloat(c[2]));
+  const lows  =candles.map(c=>parseFloat(c[3]));
+  const times =candles.map(c=>c[0]);
+  const rsi   =calcRSI(closes, rsiPeriod||14);
+  const trades=[];
+  let lastCloseBar=-1;
+
+  for(let i=16;i<candles.length-1;i++){
+    if(!rsi[i-1]||!rsi[i]) continue;
+    if(times[i]<startTs||times[i]>endTs) continue;
+    if(singleMode && i<=lastCloseBar) continue;
+
+    const sig = dir==='buy'
+      ? (rsi[i-1]<rsiLevel && rsi[i]>rsiLevel)
+      : (rsi[i-1]>rsiLevel && rsi[i]<rsiLevel);
+    if(!sig) continue;
+
+    // MACD 1D filter
+    const hist=getMacdHist(macdMap, times[i]);
+    if(hist===null) continue; // không có data 1D → bỏ qua
+    if(dir==='buy'  && hist<=0) continue; // histogram âm → không buy
+    if(dir==='sell' && hist>=0) continue; // histogram dương → không sell
+
+    const entry=closes[i];
+    const tp=dir==='buy'?entry*(1+tpPct/100):entry*(1-tpPct/100);
+    const sl=dir==='buy'?entry*(1-slPct/100):entry*(1+slPct/100);
+    let result='OPEN',pnl=null,exitBar=-1;
+
+    for(let j=i+1;j<candles.length;j++){
+      if(dir==='buy'){
+        if(highs[j]>=tp){result='WIN';pnl=tpPct;exitBar=j;break;}
+        if(lows[j]<=sl){result='LOSS';pnl=-slPct;exitBar=j;break;}
+      } else {
+        if(lows[j]<=tp){result='WIN';pnl=tpPct;exitBar=j;break;}
+        if(highs[j]>=sl){result='LOSS';pnl=-slPct;exitBar=j;break;}
+      }
+    }
+    if(singleMode) lastCloseBar=exitBar>0?exitBar:candles.length;
+    const d=new Date(times[i]);
+    trades.push({
+      time:pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes()),
+      entry:entry>100?entry.toFixed(2):entry.toFixed(4),
+      rsi:rsi[i].toFixed(2), result, pnl
+    });
+  }
+  return trades;
+}
 
 async function runOptimizer(){
   if(optState.running) return;
@@ -931,14 +1012,23 @@ async function runOptimizer(){
   if(!startTs||!endTs){ alert('Ngày không hợp lệ'); return; }
 
   optState.running=true; optState.results=[]; optState.progress=0;
-  const combos = OPT_RSI.length * OPT_TP.length * OPT_SL.length * OPT_DIRS.length;
+  const combos = OPT_RSI_PERIODS.length * OPT_RSI.length * OPT_TP.length * OPT_SL.length * OPT_DIRS.length * OPT_MACD_MODES.length;
   optState.total = combos;
-  optState.statusMsg = `Đang tải dữ liệu ${optState.coin}...`;
+  optState.statusMsg = `Đang tải nến 1H ${optState.coin}...`;
   renderOptimizer();
 
-  let candles;
+  let candles1H, candles1D, macdMap;
   try {
-    candles = await fetchKlines(optState.coin, startTs, endTs);
+    candles1H = await fetchKlines(optState.coin, startTs, endTs);
+    optState.statusMsg = `Đang tải nến 1D ${optState.coin}...`;
+    renderOptimizer();
+    // Fetch 1D — lấy rộng hơn 60 ngày để MACD warm up đủ
+    const startD = startTs - 60*86400000;
+    const url1D = `https://api.binance.com/api/v3/klines?symbol=${optState.coin}&interval=1d&startTime=${startD}&endTime=${endTs}&limit=1000`;
+    const r1D = await fetch(url1D);
+    if(!r1D.ok) throw new Error('Lỗi fetch 1D: '+r1D.status);
+    candles1D = await r1D.json();
+    macdMap = buildMacdMap(candles1D);
   } catch(e) {
     optState.statusMsg = '❌ Lỗi: ' + e.message;
     optState.running = false;
@@ -948,35 +1038,44 @@ async function runOptimizer(){
   optState.statusMsg = `Đang thử ${combos} tổ hợp...`;
   renderOptimizer();
 
-  // Chạy tất cả tổ hợp (sync, rất nhanh)
   const res = [];
   let done = 0;
-  for(const dir of OPT_DIRS){
-    for(const rsi of OPT_RSI){
-      for(const tp of OPT_TP){
-        for(const sl of OPT_SL){
-          const trades = backtest(candles, dir, startTs, endTs, rsi, tp, sl, optState.singleMode);
-          const sum    = summarize(trades);
-          const wr     = sum.closed>0 ? sum.wins/sum.closed*100 : 0;
-          if(sum.closed >= optState.minTrades && wr >= optState.minWR && sum.totalPnl >= optState.minPnl){
-            res.push({ dir, rsi, tp, sl,
-              trades: sum.closed, wins: sum.wins, losses: sum.losses,
-              wr: parseFloat(wr.toFixed(1)), pnl: parseFloat(sum.totalPnl.toFixed(2)) });
-          }
-          done++;
-          // Update progress mỗi 50 combo
-          if(done % 50 === 0){
-            optState.progress = done;
-            renderOptimizerProgress();
+
+  for(const macdMode of OPT_MACD_MODES){
+    for(const period of OPT_RSI_PERIODS){
+      for(const dir of OPT_DIRS){
+        for(const rsi of OPT_RSI){
+          for(const tp of OPT_TP){
+            for(const sl of OPT_SL){
+              let trades;
+              if(macdMode==='none'){
+                // Không dùng MACD — gọi backtest gốc với rsiPeriod
+                trades = backtest(candles1H, dir, startTs, endTs, rsi, tp, sl, optState.singleMode, period);
+              } else {
+                // Dùng MACD 1D filter
+                trades = backtestWithMacd(candles1H, dir, startTs, endTs, rsi, tp, sl, optState.singleMode, period, macdMap);
+              }
+              const sum = summarize(trades);
+              const wr  = sum.closed>0 ? sum.wins/sum.closed*100 : 0;
+              if(sum.closed>=optState.minTrades && wr>=optState.minWR && sum.totalPnl>=optState.minPnl){
+                res.push({ macdMode, period, dir, rsi, tp, sl,
+                  trades:sum.closed, wins:sum.wins, losses:sum.losses,
+                  wr:parseFloat(wr.toFixed(1)), pnl:parseFloat(sum.totalPnl.toFixed(2)) });
+              }
+              done++;
+              if(done % 100 === 0){
+                optState.progress=done;
+                renderOptimizerProgress();
+              }
+            }
           }
         }
       }
     }
   }
 
-  // Sort
-  res.sort((a,b) => b[optState.sortBy==='wr'?'wr':optState.sortBy==='trades'?'trades':'pnl']
-                  - a[optState.sortBy==='wr'?'wr':optState.sortBy==='trades'?'trades':'pnl']);
+  res.sort((a,b)=>b[optState.sortBy==='wr'?'wr':optState.sortBy==='trades'?'trades':'pnl']
+                 -a[optState.sortBy==='wr'?'wr':optState.sortBy==='trades'?'trades':'pnl']);
 
   optState.results  = res;
   optState.progress = combos;
@@ -1008,7 +1107,7 @@ function renderOptimizer(){
 
   let html = `<div class="opt-card">
     <div class="opt-title">🔍 AUTO OPTIMIZER</div>
-    <div class="opt-sub">Thử tự động ${OPT_RSI.length}×${OPT_TP.length}×${OPT_SL.length}×2 = ${OPT_RSI.length*OPT_TP.length*OPT_SL.length*2} tổ hợp · Tìm WinRate ≥ mục tiêu</div>
+    <div class="opt-sub">Thử tự động ${OPT_RSI_PERIODS.length} RSI Period × ${OPT_RSI.length} RSI Level × ${OPT_TP.length} TP × ${OPT_SL.length} SL × 2 chiều × 2 MACD = ${OPT_RSI_PERIODS.length*OPT_RSI.length*OPT_TP.length*OPT_SL.length*2*2} tổ hợp</div>
 
     <div class="opt-grid">
       <div><div class="flbl">Coin</div>
@@ -1086,17 +1185,23 @@ function renderOptimizer(){
       <div class="tbl-scroll">
       <table>
         <thead><tr>
-          <th>#</th><th>Hướng</th><th>RSI</th><th>TP%</th><th>SL%</th><th>R:R</th>
+          <th>#</th><th>MACD 1D</th><th>RSI Period</th><th>Hướng</th>
+          <th>RSI Lv</th><th>TP%</th><th>SL%</th><th>R:R</th>
           <th>Lệnh</th><th>WIN</th><th>LOSS</th><th>WinRate</th><th>PnL</th>
         </tr></thead>
         <tbody>
         ${o.results.slice(0,50).map((r,i)=>{
-          const rr = (r.tp/r.sl).toFixed(1);
-          const wrc= r.wr>=55?'var(--grn)':r.wr>=50?'var(--ora)':'var(--red)';
-          const pc = r.pnl>=0?'var(--grn)':'var(--red)';
-          const dc = r.dir==='buy'?'var(--grn)':'#ff8899';
+          const rr=(r.tp/r.sl).toFixed(1);
+          const wrc=r.wr>=55?'var(--grn)':r.wr>=50?'var(--ora)':'var(--red)';
+          const pc=r.pnl>=0?'var(--grn)':'var(--red)';
+          const dc=r.dir==='buy'?'var(--grn)':'#ff8899';
+          const macdLabel=r.macdMode==='macd'
+            ?'<span style="color:var(--cyn);font-weight:700">✅ ON</span>'
+            :'<span style="color:var(--dim)">—</span>';
           return `<tr>
             <td style="color:var(--dim)">${i+1}</td>
+            <td>${macdLabel}</td>
+            <td style="color:var(--acc);font-weight:700">${r.period}</td>
             <td style="color:${dc};font-weight:700">${r.dir==='buy'?'▲ BUY':'▼ SELL'}</td>
             <td style="color:var(--acc)">${r.rsi}</td>
             <td style="color:var(--grn)">+${r.tp}%</td>
