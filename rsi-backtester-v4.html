@@ -249,7 +249,7 @@ function mkSess(id){
     coins:'BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT',
     start:'13/04/2025', end:todayStr(),
     dir:'buy', rsiLevel:50,
-    tp:3, sl:1.5, singleMode:true, reverseMode:false, flipWindow:5 };
+    tp:3, sl:1.5, singleMode:true, reverseMode:false, flipWindow:5, rsiPeriod:14, macdMode:'none' };
 }
 function todayStr(){
   const n=new Date();
@@ -482,15 +482,57 @@ async function runSession(){
 
   const syms=session.coins.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean).slice(0,5);
   const res={}, revRes={};
+  const rsiPeriod=parseInt(session.rsiPeriod)||14;
+  const macdMode=session.macdMode||'none';
+
+  // Fetch 1D nếu cần MACD
+  let sessionMacdMap=null;
+  if(macdMode!=='none'){
+    try{
+      setStatus('⏳ Đang tải nến 1D cho MACD...');
+      const startD=startTs-60*86400000;
+      // Fetch 1D cho coin đầu tiên (dùng chung map cho tất cả coin)
+      // Mỗi coin sẽ fetch 1D riêng bên dưới
+    } catch(e){}
+  }
+
   try{
     for(const sym of syms){
       setStatus('⏳ '+sym+': đang kết nối Binance...');
       const candles=await fetchKlines(sym,startTs,endTs);
-      res[sym]=summarize(backtest(candles,session.dir,startTs,endTs,
-        parseFloat(session.rsiLevel)||50,
-        parseFloat(session.tp)||3,
-        parseFloat(session.sl)||1.5,
-        session.singleMode));
+
+      // Fetch 1D và build MACD map nếu cần
+      let macdMap=null;
+      if(macdMode!=='none'){
+        setStatus('⏳ '+sym+': đang tải nến 1D (MACD)...');
+        const startD=startTs-60*86400000;
+        const url1D=`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=1d&startTime=${startD}&endTime=${endTs}&limit=1000`;
+        const r1D=await fetch(url1D);
+        if(r1D.ok){ const c1D=await r1D.json(); macdMap=buildMacdMap(c1D); }
+      }
+
+      // Chạy backtest với filter tương ứng
+      let trades;
+      if(macdMode!=='none' && macdMap){
+        // Tạo macdMap filter theo mode pos/neg
+        const filteredMap=new Map();
+        macdMap.forEach((v,k)=>{
+          if(macdMode==='pos' && v>0) filteredMap.set(k,v);
+          else if(macdMode==='neg' && v<0) filteredMap.set(k,v);
+        });
+        trades=backtestWithMacd(candles,session.dir,startTs,endTs,
+          parseFloat(session.rsiLevel)||50,
+          parseFloat(session.tp)||3,
+          parseFloat(session.sl)||1.5,
+          session.singleMode, rsiPeriod, filteredMap);
+      } else {
+        trades=backtest(candles,session.dir,startTs,endTs,
+          parseFloat(session.rsiLevel)||50,
+          parseFloat(session.tp)||3,
+          parseFloat(session.sl)||1.5,
+          session.singleMode, rsiPeriod);
+      }
+      res[sym]=summarize(trades);
       if(session.reverseMode){
         const rv=backtestReverse(candles,session.dir,startTs,endTs,
           parseFloat(session.rsiLevel)||50,
@@ -558,12 +600,59 @@ function renderConfig(){
       <div class="flbl">Ngưỡng RSI cắt qua</div>
       <div class="rsi-row">
         <div class="rsi-label-wrap">
-          <div style="font-size:12px;color:var(--txt)">RSI(14) ${dir==='buy'?'cắt lên':'cắt xuống'} ngưỡng này</div>
+          <div style="font-size:12px;color:var(--txt)">RSI(${s.rsiPeriod}) ${dir==='buy'?'cắt lên':'cắt xuống'} ngưỡng này</div>
           <div class="rsi-hint">Mặc định 50 · Nhập từ 1–99</div>
         </div>
         <div class="rsi-input-wrap">
           <input type="number" min="1" max="99" step="1" value="${s.rsiLevel}" oninput="setField(${s.id},'rsiLevel',this.value)">
         </div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <div class="flbl">RSI Period (nến 1H)</div>
+      <div style="display:flex;gap:8px;">
+        ${[7,10,14,21].map(p=>`
+          <button onclick="setField(${s.id},'rsiPeriod',${p})" style="
+            flex:1;padding:9px 4px;border-radius:8px;cursor:pointer;
+            font:700 14px/1 'JetBrains Mono',monospace;
+            background:${s.rsiPeriod==p?'rgba(124,111,255,.2)':'var(--bg2)'};
+            border:1.5px solid ${s.rsiPeriod==p?'var(--acc)':'var(--b2)'};
+            color:${s.rsiPeriod==p?'var(--acc)':'var(--dim)'};
+            transition:all .15s;">${p}</button>
+        `).join('')}
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <div class="flbl">MACD Filter (nến 1D)</div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="setField(${s.id},'macdMode','none')" style="
+          flex:1;padding:9px 6px;border-radius:8px;cursor:pointer;
+          font:700 11px/1 'Outfit',sans-serif;
+          background:${s.macdMode==='none'?'rgba(96,96,128,.3)':'var(--bg2)'};
+          border:1.5px solid ${s.macdMode==='none'?'var(--dim)':'var(--b2)'};
+          color:${s.macdMode==='none'?'var(--txt)':'var(--dim)'};
+          transition:all .15s;">— Không dùng</button>
+        <button onclick="setField(${s.id},'macdMode','pos')" style="
+          flex:1;padding:9px 6px;border-radius:8px;cursor:pointer;
+          font:700 11px/1 'Outfit',sans-serif;
+          background:${s.macdMode==='pos'?'rgba(0,240,133,.1)':'var(--bg2)'};
+          border:1.5px solid ${s.macdMode==='pos'?'var(--grn)':'var(--b2)'};
+          color:${s.macdMode==='pos'?'var(--grn)':'var(--dim)'};
+          transition:all .15s;">▲ Hist dương</button>
+        <button onclick="setField(${s.id},'macdMode','neg')" style="
+          flex:1;padding:9px 6px;border-radius:8px;cursor:pointer;
+          font:700 11px/1 'Outfit',sans-serif;
+          background:${s.macdMode==='neg'?'rgba(255,61,85,.1)':'var(--bg2)'};
+          border:1.5px solid ${s.macdMode==='neg'?'var(--red)':'var(--b2)'};
+          color:${s.macdMode==='neg'?'var(--red)':'var(--dim)'};
+          transition:all .15s;">▼ Hist âm</button>
+      </div>
+      <div style="font-size:10px;color:var(--dim);margin-top:5px;">
+        ${s.macdMode==='none'?'Không lọc theo MACD — trade tất cả tín hiệu RSI':
+          s.macdMode==='pos'?'Chỉ trade khi MACD 1D histogram dương (▲ xu hướng tăng)':
+          'Chỉ trade khi MACD 1D histogram âm (▼ xu hướng giảm)'}
       </div>
     </div>
 
@@ -624,6 +713,10 @@ function renderConfig(){
       <div class="chip">SL: <span class="chip-v" style="color:var(--red)">${slSign}${slPct}%</span></div>
       <div class="chip">R:R <span class="chip-v" style="color:var(--dim)">1:${rrRaw}</span></div>
       <div class="chip">RSI <span class="chip-v" style="color:var(--acc)">${s.rsiLevel}</span></div>
+      <div class="chip">Period <span class="chip-v" style="color:var(--acc)">${s.rsiPeriod}</span></div>
+      <div class="chip">MACD <span class="chip-v" style="color:${s.macdMode==='none'?'var(--dim)':s.macdMode==='pos'?'var(--grn)':'var(--red)'}">
+        ${s.macdMode==='none'?'OFF':s.macdMode==='pos'?'▲ DƯƠNG':'▼ ÂM'}
+      </span></div>
       <div class="chip">Mode <span class="chip-v" style="color:${s.singleMode?'var(--grn)':'var(--ora)'}">${s.singleMode?'SINGLE':'MULTI'}</span></div>
     </div>
 
