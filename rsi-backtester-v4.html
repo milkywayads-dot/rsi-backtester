@@ -222,7 +222,7 @@ tr:nth-child(even) td{background:rgba(16,16,36,.6);}
 //  STATE
 // ══════════════════════════════════════════════
 let sid = 1, sessions = [mkSess(1)];
-let results = {}, errors = {}, statusMsg = '';
+let results = {}, revResults = {}, errors = {}, statusMsg = '';
 let activeS = 1, activeC = null;
 let expanded = new Set(), loading = false;
 
@@ -231,7 +231,7 @@ function mkSess(id){
     coins:'BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT',
     start:'13/04/2025', end:todayStr(),
     dir:'buy', rsiLevel:50,
-    tp:3, sl:1.5, singleMode:true };
+    tp:3, sl:1.5, singleMode:true, reverseMode:false };
 }
 function todayStr(){
   const n=new Date();
@@ -325,6 +325,74 @@ function summarize(trades){
 }
 
 // ══════════════════════════════════════════════
+//  BACKTEST REVERSE — đảo chiều khi 5 lệnh LOSS > WIN
+// ══════════════════════════════════════════════
+function backtestReverse(candles, startDir, startTs, endTs, rsiLevel, tpPct, slPct){
+  const closes=candles.map(c=>parseFloat(c[4]));
+  const highs =candles.map(c=>parseFloat(c[2]));
+  const lows  =candles.map(c=>parseFloat(c[3]));
+  const times =candles.map(c=>c[0]);
+  const rsi   =calcRSI(closes);
+
+  // Pre-compute tín hiệu cả 2 chiều
+  const sigs=new Array(candles.length).fill(null);
+  for(let i=16;i<candles.length-1;i++){
+    if(!rsi[i-1]||!rsi[i]) continue;
+    if(times[i]<startTs||times[i]>endTs) continue;
+    if(rsi[i-1]<rsiLevel&&rsi[i]>rsiLevel) sigs[i]='buy';
+    else if(rsi[i-1]>rsiLevel&&rsi[i]<rsiLevel) sigs[i]='sell';
+  }
+
+  const trades=[];
+  let curDir=startDir;
+  let lastCloseBar=-1;
+  let flipCount=0;
+
+  for(let i=16;i<candles.length-1;i++){
+    if(i<=lastCloseBar) continue;
+    if(sigs[i]!==curDir) continue;
+
+    const entry=closes[i];
+    const tp=curDir==='buy'?entry*(1+tpPct/100):entry*(1-tpPct/100);
+    const sl=curDir==='buy'?entry*(1-slPct/100):entry*(1+slPct/100);
+    let result='OPEN',pnl=null,exitBar=-1;
+
+    for(let j=i+1;j<candles.length;j++){
+      if(curDir==='buy'){
+        if(highs[j]>=tp){result='WIN';pnl=tpPct;exitBar=j;break;}
+        if(lows[j]<=sl){result='LOSS';pnl=-slPct;exitBar=j;break;}
+      } else {
+        if(lows[j]<=tp){result='WIN';pnl=tpPct;exitBar=j;break;}
+        if(highs[j]>=sl){result='LOSS';pnl=-slPct;exitBar=j;break;}
+      }
+    }
+    lastCloseBar=exitBar>0?exitBar:candles.length;
+
+    const d=new Date(times[i]);
+    trades.push({
+      time:pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes()),
+      entry:entry>100?entry.toFixed(2):entry.toFixed(4),
+      rsi:rsi[i].toFixed(2), dir:curDir, result, pnl
+    });
+
+    // Check 5 lệnh cùng hướng liên tiếp → đảo chiều nếu LOSS > WIN
+    if(result!=='OPEN'){
+      const sameDirTrades=trades.filter(t=>t.result!=='OPEN' && t.dir===curDir);
+      const last5=sameDirTrades.slice(-5);
+      if(last5.length===5){
+        const w5=last5.filter(t=>t.result==='WIN').length;
+        const l5=last5.filter(t=>t.result==='LOSS').length;
+        if(l5>w5){
+          curDir=curDir==='buy'?'sell':'buy';
+          flipCount++;
+        }
+      }
+    }
+  }
+  return {trades, flipCount};
+}
+
+// ══════════════════════════════════════════════
 //  FETCH BINANCE
 // ══════════════════════════════════════════════
 async function fetchKlines(symbol, startTs, endTs){
@@ -389,7 +457,7 @@ async function runSession(){
   loading=true;render();
 
   const syms=session.coins.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean).slice(0,5);
-  const res={};
+  const res={}, revRes={};
   try{
     for(const sym of syms){
       setStatus('⏳ '+sym+': đang kết nối Binance...');
@@ -399,8 +467,17 @@ async function runSession(){
         parseFloat(session.tp)||3,
         parseFloat(session.sl)||1.5,
         session.singleMode));
+      if(session.reverseMode){
+        const rv=backtestReverse(candles,session.dir,startTs,endTs,
+          parseFloat(session.rsiLevel)||50,
+          parseFloat(session.tp)||3,
+          parseFloat(session.sl)||1.5);
+        revRes[sym]=summarize(rv.trades);
+        revRes[sym].flipCount=rv.flipCount;
+      }
     }
     results[activeS]=res;
+    revResults[activeS]=session.reverseMode?revRes:null;
     activeC=syms[0];
   } catch(e){
     errors[activeS]=e.message;
@@ -490,6 +567,16 @@ function renderConfig(){
           : '⚠️ Tính tất cả tín hiệu kể cả trùng — kết quả lạc quan hơn thực tế'}</div>
       </div>
       <div class="toggle-sw ${s.singleMode?'on':''}"></div>
+    </div>
+
+    <div class="toggle-row ${s.reverseMode?'on':''}" onclick="setField(${s.id},'reverseMode',!sessions.find(x=>x.id===${s.id}).reverseMode)">
+      <div class="toggle-info">
+        <div class="toggle-title">Đảo chiều theo 5 lệnh</div>
+        <div class="toggle-desc">${s.reverseMode
+          ? '✅ Tự đảo BUY↔SELL khi 5 lệnh gần nhất LOSS > WIN — hiện thống kê riêng bên dưới'
+          : '⭕ Bật để mô phỏng chiến lược đảo chiều động theo 5 lệnh gần nhất'}</div>
+      </div>
+      <div class="toggle-sw ${s.reverseMode?'on':''}"></div>
     </div>
 
     <div class="chips" style="margin-bottom:14px">
@@ -619,6 +706,149 @@ function renderResults(){
     </tr>`;
   });
   html+=`</tbody></table></div></div>`;
+
+  // ── SO SÁNH TRỰC TIẾP ──
+  const revRes=revResults[activeS];
+  if(revRes && revRes[activeC]){
+    const rv=revRes[activeC];
+    const d2=res[activeC];
+    const wr1=d2.closed>0?(d2.wins/d2.closed*100).toFixed(1):'—';
+    const wr2=rv.closed>0?(rv.wins/rv.closed*100).toFixed(1):'—';
+    const pnl1=d2.totalPnl, pnl2=rv.totalPnl;
+    const better=pnl2>pnl1?'REVERSE':'ORIGINAL';
+
+    html+=`<div style="background:var(--bg2);border:1px solid var(--b2);border-radius:14px;padding:14px;margin-bottom:18px;">
+      <div style="font-size:11px;color:var(--acc);font-weight:800;letter-spacing:1px;margin-bottom:12px;">
+        ⚖ SO SÁNH — ${activeC}
+        <span style="margin-left:8px;font-size:10px;background:${better==='REVERSE'?'rgba(124,111,255,.2)':'rgba(0,240,133,.15)'};
+          color:${better==='REVERSE'?'var(--acc)':'var(--grn)'};
+          border-radius:4px;padding:2px 8px;">
+          ${better==='REVERSE'?'▲ REVERSE tốt hơn':'▲ ORIGINAL tốt hơn'}
+        </span>
+      </div>
+      <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead><tr>
+          <th style="padding:8px 10px;text-align:left;color:var(--dim);border-bottom:1px solid var(--b1);font-size:10px;letter-spacing:1px;">CHIẾN LƯỢC</th>
+          <th style="padding:8px 10px;text-align:center;color:var(--dim);border-bottom:1px solid var(--b1);font-size:10px;">LỆNH</th>
+          <th style="padding:8px 10px;text-align:center;color:var(--grn);border-bottom:1px solid var(--b1);font-size:10px;">WIN</th>
+          <th style="padding:8px 10px;text-align:center;color:var(--red);border-bottom:1px solid var(--b1);font-size:10px;">LOSS</th>
+          <th style="padding:8px 10px;text-align:center;color:var(--dim);border-bottom:1px solid var(--b1);font-size:10px;">WIN RATE</th>
+          <th style="padding:8px 10px;text-align:center;color:var(--dim);border-bottom:1px solid var(--b1);font-size:10px;">TỔNG PnL</th>
+        </tr></thead>
+        <tbody>
+          <tr style="border-bottom:1px solid var(--b1);">
+            <td style="padding:10px;font-weight:700;color:var(--grn);">1 chiều (${sess?.dir?.toUpperCase()})</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;">${d2.closed}</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;color:var(--grn);font-weight:700;">${d2.wins}</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;color:var(--red);font-weight:700;">${d2.losses}</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;font-weight:700;color:${parseFloat(wr1)>=50?'var(--grn)':'var(--ora)'};">${wr1}%</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;font-weight:800;color:${pnl1>=0?'var(--grn)':'var(--red)'};">${(pnl1>=0?'+':'')+pnl1.toFixed(2)}%</td>
+          </tr>
+          <tr>
+            <td style="padding:10px;font-weight:700;color:var(--acc);">Đảo chiều (${rv.flipCount}x flip)</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;">${rv.closed}</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;color:var(--grn);font-weight:700;">${rv.wins}</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;color:var(--red);font-weight:700;">${rv.losses}</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;font-weight:700;color:${parseFloat(wr2)>=50?'var(--grn)':'var(--ora)'};">${wr2}%</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;font-weight:800;color:${pnl2>=0?'var(--grn)':'var(--red)'};">${(pnl2>=0?'+':'')+pnl2.toFixed(2)}%</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--dim);text-align:center;">
+        Chênh lệch PnL: <span style="font-weight:800;font-family:monospace;color:${pnl2-pnl1>=0?'var(--grn)':'var(--red)'};">
+          ${(pnl2-pnl1>=0?'+':'')+( pnl2-pnl1).toFixed(2)}%
+        </span> cho chiến lược đảo chiều
+      </div>
+    </div>`;
+    const rwr=rv.closed>0?(rv.wins/rv.closed*100).toFixed(1)+'%':'—';
+    const rwrC=rv.closed>0&&rv.wins/rv.closed>=0.5?'var(--grn)':'var(--ora)';
+    const rpnlStr=(rv.totalPnl>=0?'+':'')+rv.totalPnl.toFixed(2)+'%';
+    const rpnlC=rv.totalPnl>=0?'var(--grn)':'var(--red)';
+    const expKeyRv=activeS+'-'+activeC+'-rv';
+    const showAllRv=expanded.has(expKeyRv);
+    const tradesRv=showAllRv?rv.trades:rv.trades.slice(0,30);
+
+    html+=`
+    <div style="background:linear-gradient(135deg,rgba(124,111,255,.08),rgba(0,207,255,.05));border:1px solid var(--acc);border-radius:14px;padding:14px;margin-bottom:18px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+        <div style="width:3px;height:20px;background:linear-gradient(180deg,var(--acc),var(--cyn));border-radius:4px;"></div>
+        <div>
+          <div style="font-size:12px;font-weight:800;color:var(--acc);letter-spacing:1px;">CHIẾN LƯỢC ĐẢO CHIỀU — ${activeC}</div>
+          <div style="font-size:10px;color:var(--dim);margin-top:2px;">Bắt đầu ${sess?.dir?.toUpperCase()} · Đảo khi 5 lệnh LOSS > WIN · Số lần đảo: <span style="color:var(--cyn);font-weight:700">${rv.flipCount}</span></div>
+        </div>
+      </div>
+      <div class="stats" style="margin-bottom:12px;">
+        <div class="sc"><div class="sc-lbl">Lệnh</div><div class="sc-val">${rv.trades.length}</div></div>
+        <div class="sc"><div class="sc-lbl">Đóng</div><div class="sc-val">${rv.closed}</div></div>
+        <div class="sc"><div class="sc-lbl">Thắng</div><div class="sc-val" style="color:var(--grn)">${rv.wins}</div></div>
+        <div class="sc"><div class="sc-lbl">Thua</div><div class="sc-val" style="color:var(--red)">${rv.losses}</div></div>
+        <div class="sc"><div class="sc-lbl">Win Rate</div><div class="sc-val" style="color:${rwrC}">${rwr}</div></div>
+        <div class="sc"><div class="sc-lbl">Tổng PnL</div><div class="sc-val" style="color:${rpnlC}">${rpnlStr}</div></div>
+      </div>
+      ${rv.closed>0?`<div class="wbar-wrap" style="margin-bottom:12px;">
+        <div class="wbar-lbl">WIN / LOSS — ĐẢO CHIỀU</div>
+        <div class="wbar">
+          <div class="ws ws-w" style="width:${rv.wins/rv.closed*100}%">${rv.wins>0?'WIN '+rv.wins:''}</div>
+          <div class="ws ws-l" style="width:${rv.losses/rv.closed*100}%;color:#fff">${rv.losses>0?'LOSS '+rv.losses:''}</div>
+        </div>
+      </div>`:''}
+      <div class="tbl-wrap" style="margin-bottom:0">
+        <div class="tbl-hdr">
+          <span class="tbl-title">LỊCH SỬ ĐẢO CHIỀU</span>
+          <span class="tbl-cnt">${rv.trades.length} lệnh</span>
+        </div>
+        <div class="tbl-scroll"><table>
+          <thead><tr><th>#</th><th>Thời gian</th><th>Hướng</th><th>Giá vào</th><th>RSI</th><th>PnL</th><th>KQ</th></tr></thead>
+          <tbody>
+          ${tradesRv.map((t,i)=>{
+            const ps=t.pnl===null?'—':(t.pnl>0?'+':'')+t.pnl+'%';
+            const pc=t.pnl===null?'var(--dim)':t.pnl>0?'var(--grn)':'var(--red)';
+            const bk=t.result==='WIN'?'bw':t.result==='LOSS'?'bl':'bo';
+            const dc=t.dir==='buy'?'var(--grn)':'#ff8899';
+            return `<tr>
+              <td style="color:var(--dim)">${i+1}</td>
+              <td style="color:var(--dim)">${t.time}</td>
+              <td style="color:${dc};font-weight:700">${t.dir==='buy'?'▲ BUY':'▼ SELL'}</td>
+              <td>${t.entry}</td>
+              <td style="color:var(--acc)">${t.rsi}</td>
+              <td style="color:${pc};font-weight:700">${ps}</td>
+              <td><span class="badge ${bk}">${t.result}</span></td>
+            </tr>`;
+          }).join('')}
+          </tbody>
+        </table></div>
+        ${rv.trades.length>30?`<button class="more-btn" onclick="toggleExpand('${expKeyRv}')">
+          ${showAllRv?'▲ THU GỌN':'▼ XEM THÊM '+(rv.trades.length-30)+' GIAO DỊCH'}
+        </button>`:''}
+      </div>
+    </div>
+
+    <div class="sum-wrap">
+      <div class="sum-title">TỔNG KẾT ĐẢO CHIỀU — TẤT CẢ COIN</div>
+      <div class="tbl-scroll"><table class="summary-table">
+        <thead><tr><th>Coin</th><th>Lệnh</th><th>Đóng</th><th>WIN</th><th>LOSS</th><th>Win Rate</th><th>PnL</th><th>Đảo</th></tr></thead>
+        <tbody>
+        ${syms.map(sym=>{
+          const sd=revRes[sym];if(!sd) return '';
+          const wr2=sd.closed>0?(sd.wins/sd.closed*100).toFixed(1)+'%':'—';
+          const wrc=parseFloat(wr2)>=50?'var(--grn)':'var(--ora)';
+          const pnl2=(sd.totalPnl>=0?'+':'')+sd.totalPnl.toFixed(2)+'%';
+          const pc=sd.totalPnl>=0?'var(--grn)':'var(--red)';
+          return `<tr>
+            <td class="sym">${sym}</td><td>${sd.trades.length}</td><td>${sd.closed}</td>
+            <td style="color:var(--grn);font-weight:700">${sd.wins}</td>
+            <td style="color:var(--red);font-weight:700">${sd.losses}</td>
+            <td style="color:${wrc};font-weight:700">${wr2}</td>
+            <td style="color:${pc};font-weight:700">${pnl2}</td>
+            <td style="color:var(--cyn)">${sd.flipCount}x</td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table></div>
+    </div>`;
+  }
 
   el.innerHTML=html;
 }
