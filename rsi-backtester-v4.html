@@ -377,13 +377,13 @@ function backtestReverse(candles, startDir, startTs, endTs, rsiLevel, tpPct, slP
       rsi:rsi[i].toFixed(2), dir:curDir, result, pnl
     });
 
-    // Check 5 lệnh cùng hướng liên tiếp từ lần flip gần nhất → LOSS > WIN thì đảo
+    // Check sau mỗi lệnh đóng: xét N lệnh gần nhất cùng chiều, LOSS > WIN → đảo
     if(result!=='OPEN'){
       const tradesAfterFlip=trades.slice(lastFlipIdx).filter(t=>t.result!=='OPEN'&&t.dir===curDir);
-      const last5=tradesAfterFlip.slice(-flipWindow);
-      if(last5.length===flipWindow){
-        const w5=last5.filter(t=>t.result==='WIN').length;
-        const l5=last5.filter(t=>t.result==='LOSS').length;
+      const lastN=tradesAfterFlip.slice(-flipWindow);
+      if(lastN.length>=2){ // cần ít nhất 2 lệnh để xét tỷ lệ
+        const w5=lastN.filter(t=>t.result==='WIN').length;
+        const l5=lastN.filter(t=>t.result==='LOSS').length;
         if(l5>w5){
           curDir=curDir==='buy'?'sell':'buy';
           flipCount++;
