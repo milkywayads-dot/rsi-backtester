@@ -178,6 +178,17 @@ tr:nth-child(even) td{background:rgba(16,16,36,.6);}
 .empty-ico{font-size:38px;margin-bottom:12px;}
 .empty-txt{font-size:14px;color:#444;line-height:1.6;}
 
+/* ── TOGGLE SWITCH ── */
+.toggle-row{display:flex;align-items:center;justify-content:space-between;background:var(--bg2);border:1.5px solid var(--b2);border-radius:10px;padding:11px 14px;margin-bottom:14px;cursor:pointer;transition:border-color .15s;}
+.toggle-row.on{border-color:var(--acc);}
+.toggle-info{flex:1;}
+.toggle-title{font-size:13px;font-weight:700;color:var(--txt);}
+.toggle-desc{font-size:11px;color:var(--dim);margin-top:3px;}
+.toggle-sw{width:42px;height:24px;border-radius:12px;background:var(--b2);position:relative;flex-shrink:0;transition:background .2s;}
+.toggle-sw.on{background:var(--acc);}
+.toggle-sw::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .2s;box-shadow:0 1px 4px rgba(0,0,0,.4);}
+.toggle-sw.on::after{transform:translateX(18px);}
+
 /* ── FOOTER ── */
 .footer{text-align:center;font-size:10px;color:#222;margin-top:16px;}
 
@@ -219,7 +230,8 @@ function mkSess(id){
   return { id, label:'Phiên '+id,
     coins:'BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT',
     start:'13/04/2025', end:todayStr(),
-    dir:'buy', rsiLevel:50 };
+    dir:'buy', rsiLevel:50,
+    tp:3, sl:1.5, singleMode:true };
 }
 function todayStr(){
   const n=new Date();
@@ -250,41 +262,53 @@ function calcRSI(closes, period){
 // ══════════════════════════════════════════════
 //  BACKTEST
 // ══════════════════════════════════════════════
-function backtest(candles, dir, startTs, endTs, rsiLevel){
+function backtest(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, singleMode){
   const closes=candles.map(c=>parseFloat(c[4]));
   const highs =candles.map(c=>parseFloat(c[2]));
   const lows  =candles.map(c=>parseFloat(c[3]));
   const times =candles.map(c=>c[0]);
   const rsi   =calcRSI(closes);
   const trades=[];
+  let lastCloseBar=-1; // bar index khi lệnh trước đóng
 
   for(let i=16;i<candles.length-1;i++){
     if(!rsi[i-1]||!rsi[i]) continue;
     if(times[i]<startTs||times[i]>endTs) continue;
+
+    // Bỏ qua nếu singleMode và lệnh trước chưa đóng
+    if(singleMode && i<=lastCloseBar) continue;
+
     const sig = dir==='buy'
       ? (rsi[i-1]<rsiLevel && rsi[i]>rsiLevel)
       : (rsi[i-1]>rsiLevel && rsi[i]<rsiLevel);
     if(!sig) continue;
 
     const entry=closes[i];
-    const tp=dir==='buy'?entry*1.03:entry*0.97;
-    const sl=dir==='buy'?entry*0.985:entry*1.015;
-    let result='OPEN',pnl=null;
+    const tp=dir==='buy'?entry*(1+tpPct/100):entry*(1-tpPct/100);
+    const sl=dir==='buy'?entry*(1-slPct/100):entry*(1+slPct/100);
+    let result='OPEN',pnl=null,exitBar=-1;
 
     for(let j=i+1;j<candles.length;j++){
       if(dir==='buy'){
-        if(highs[j]>=tp){result='WIN';pnl=3;break;}
-        if(lows[j]<=sl){result='LOSS';pnl=-1.5;break;}
+        if(highs[j]>=tp){result='WIN';pnl=tpPct;exitBar=j;break;}
+        if(lows[j]<=sl){result='LOSS';pnl=-slPct;exitBar=j;break;}
       } else {
-        if(lows[j]<=tp){result='WIN';pnl=3;break;}
-        if(highs[j]>=sl){result='LOSS';pnl=-1.5;break;}
+        if(lows[j]<=tp){result='WIN';pnl=tpPct;exitBar=j;break;}
+        if(highs[j]>=sl){result='LOSS';pnl=-slPct;exitBar=j;break;}
       }
     }
+
+    // Cập nhật lastCloseBar để chặn lệnh trùng
+    if(singleMode){
+      lastCloseBar = exitBar>0 ? exitBar : candles.length;
+    }
+
     const d=new Date(times[i]);
     trades.push({
       time:pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes()),
       entry:entry>100?entry.toFixed(2):entry.toFixed(4),
-      rsi:rsi[i].toFixed(2), tp:tp>100?tp.toFixed(2):tp.toFixed(4),
+      rsi:rsi[i].toFixed(2),
+      tp:tp>100?tp.toFixed(2):tp.toFixed(4),
       sl:sl>100?sl.toFixed(2):sl.toFixed(4),
       result, pnl
     });
@@ -355,11 +379,11 @@ async function runSession(){
 
   const startTs=parseDate(session.start,false);
   const endTs  =parseDate(session.end,true);
-  const rsiLevel=parseFloat(session.rsiLevel)||50;
 
   if(!startTs||!endTs){errors[activeS]='Ngày không hợp lệ (dd/mm/yyyy)';render();return;}
   if(startTs>endTs){errors[activeS]='Ngày bắt đầu phải trước kết thúc';render();return;}
-  if(rsiLevel<1||rsiLevel>99){errors[activeS]='RSI Level phải từ 1–99';render();return;}
+  if(parseFloat(session.rsiLevel)<1||parseFloat(session.rsiLevel)>99){errors[activeS]='RSI Level phải từ 1–99';render();return;}
+  if(parseFloat(session.tp)<=0||parseFloat(session.sl)<=0){errors[activeS]='TP và SL phải lớn hơn 0';render();return;}
 
   delete errors[activeS];
   loading=true;render();
@@ -370,7 +394,11 @@ async function runSession(){
     for(const sym of syms){
       setStatus('⏳ '+sym+': đang kết nối Binance...');
       const candles=await fetchKlines(sym,startTs,endTs);
-      res[sym]=summarize(backtest(candles,session.dir,startTs,endTs,rsiLevel));
+      res[sym]=summarize(backtest(candles,session.dir,startTs,endTs,
+        parseFloat(session.rsiLevel)||50,
+        parseFloat(session.tp)||3,
+        parseFloat(session.sl)||1.5,
+        session.singleMode));
     }
     results[activeS]=res;
     activeC=syms[0];
@@ -398,8 +426,11 @@ function renderTabs(){
 function renderConfig(){
   const s=sessions.find(s=>s.id===activeS);if(!s) return;
   const dir=s.dir;
-  const tpLabel = dir==='buy' ? '+3%' : '-3%';
-  const slLabel = dir==='buy' ? '-1.5%' : '+1.5%';
+  const tpPct=parseFloat(s.tp)||3;
+  const slPct=parseFloat(s.sl)||1.5;
+  const rrRaw=(tpPct/slPct).toFixed(1);
+  const tpSign=dir==='buy'?'+':'-';
+  const slSign=dir==='buy'?'-':'+';
 
   document.getElementById('configCard').innerHTML=`
     <div style="margin-bottom:14px">
@@ -433,15 +464,40 @@ function renderConfig(){
     </div>
 
     <div style="margin-bottom:14px">
+      <div class="flbl">Take Profit &amp; Stop Loss (%)</div>
+      <div class="fgrid">
+        <div>
+          <div style="font-size:11px;color:var(--grn);margin-bottom:5px;">▲ Take Profit %</div>
+          <input type="number" min="0.1" max="100" step="0.1" value="${tpPct}" oninput="setField(${s.id},'tp',this.value)" placeholder="3">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--red);margin-bottom:5px;">▼ Stop Loss %</div>
+          <input type="number" min="0.1" max="100" step="0.1" value="${slPct}" oninput="setField(${s.id},'sl',this.value)" placeholder="1.5">
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px">
       <div class="flbl">Danh sách coin (tối đa 5)</div>
       <input type="text" value="${esc(s.coins)}" oninput="setField(${s.id},'coins',this.value)">
     </div>
 
+    <div class="toggle-row ${s.singleMode?'on':''}" onclick="setField(${s.id},'singleMode',!sessions.find(x=>x.id===${s.id}).singleMode)">
+      <div class="toggle-info">
+        <div class="toggle-title">1 lệnh / 1 thời điểm</div>
+        <div class="toggle-desc">${s.singleMode
+          ? '✅ Bỏ qua tín hiệu mới khi lệnh cũ chưa đóng — sát thực tế nhất'
+          : '⚠️ Tính tất cả tín hiệu kể cả trùng — kết quả lạc quan hơn thực tế'}</div>
+      </div>
+      <div class="toggle-sw ${s.singleMode?'on':''}"></div>
+    </div>
+
     <div class="chips" style="margin-bottom:14px">
-      <div class="chip">Take Profit: <span class="chip-v" style="color:var(--grn)">${tpLabel}</span></div>
-      <div class="chip">Stop Loss: <span class="chip-v" style="color:var(--red)">${slLabel}</span></div>
-      <div class="chip">R:R <span class="chip-v" style="color:var(--dim)">1:2</span></div>
-      <div class="chip">RSI Level: <span class="chip-v" style="color:var(--acc)">${s.rsiLevel}</span></div>
+      <div class="chip">TP: <span class="chip-v" style="color:var(--grn)">${tpSign}${tpPct}%</span></div>
+      <div class="chip">SL: <span class="chip-v" style="color:var(--red)">${slSign}${slPct}%</span></div>
+      <div class="chip">R:R <span class="chip-v" style="color:var(--dim)">1:${rrRaw}</span></div>
+      <div class="chip">RSI <span class="chip-v" style="color:var(--acc)">${s.rsiLevel}</span></div>
+      <div class="chip">Mode <span class="chip-v" style="color:${s.singleMode?'var(--grn)':'var(--ora)'}">${s.singleMode?'SINGLE':'MULTI'}</span></div>
     </div>
 
     ${statusMsg?`<div class="status-box" id="statusLine">${statusMsg}</div>`:'<div id="statusLine"></div>'}
@@ -507,10 +563,12 @@ function renderResults(){
   const showAll=expanded.has(expKey);
   const trades=showAll?d.trades:d.trades.slice(0,30);
   const rsiLvl=sess?sess.rsiLevel:50;
+  const modeLabel=sess&&sess.singleMode?'SINGLE':'MULTI';
+  const modeColor=sess&&sess.singleMode?'var(--grn)':'var(--ora)';
 
   html+=`<div class="tbl-wrap">
     <div class="tbl-hdr">
-      <span class="tbl-title">${activeC} · ${sess?sess.dir.toUpperCase():''} · RSI cắt ${rsiLvl}</span>
+      <span class="tbl-title">${activeC} · ${sess?sess.dir.toUpperCase():''} · RSI ${rsiLvl} · <span style="color:${modeColor}">${modeLabel}</span></span>
       <span class="tbl-cnt">${d.trades.length} tín hiệu</span>
     </div>
     <div class="tbl-scroll">
