@@ -395,18 +395,14 @@ function backtestReverse(candles, startDir, startTs, endTs, rsiLevel, tpPct, slP
       rsi:rsi[i].toFixed(2), dir:curDir, result, pnl
     });
 
-    // Check sau mỗi lệnh đóng: xét N lệnh gần nhất cùng chiều, LOSS > WIN → đảo
+    // Flip ngay khi LOSS >= floor(N/2)+1 trong phạm vi N lệnh cùng chiều
+    // N=2→flip khi 2L, N=3→flip khi 2L, N=4→flip khi 3L, N=5→flip khi 3L, N=6→flip khi 4L
     if(result!=='OPEN'){
       const tradesAfterFlip=trades.slice(lastFlipIdx).filter(t=>t.result!=='OPEN'&&t.dir===curDir);
       const lastN=tradesAfterFlip.slice(-flipWindow);
-      const w5=lastN.filter(t=>t.result==='WIN').length;
-      const l5=lastN.filter(t=>t.result==='LOSS').length;
-      // N<=2: chỉ cần 1 lệnh LOSS là đảo (vì không thể loss>win với N<=2)
-      // N>=3: cần đủ ít nhất 2 lệnh và LOSS > WIN mới đảo
-      const shouldFlip = flipWindow<=2
-        ? l5>=1
-        : (lastN.length>=2 && l5>w5);
-      if(shouldFlip){
+      const lossCount=lastN.filter(t=>t.result==='LOSS').length;
+      const threshold=Math.floor(flipWindow/2)+1;
+      if(lossCount>=threshold){
         curDir=curDir==='buy'?'sell':'buy';
         flipCount++;
         lastFlipIdx=trades.length;
