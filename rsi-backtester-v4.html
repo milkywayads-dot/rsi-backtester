@@ -322,8 +322,12 @@ function backtest(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, singleMo
     }
 
     const d=new Date(times[i]);
+    const exitTime = exitBar>0
+      ? (()=>{ const e=new Date(times[exitBar]); return pad(e.getDate())+'/'+pad(e.getMonth()+1)+' '+pad(e.getHours())+':'+pad(e.getMinutes()); })()
+      : '—';
     trades.push({
       time:pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes()),
+      exitTime,
       entry:entry>100?entry.toFixed(2):entry.toFixed(4),
       rsi:rsi[i].toFixed(2),
       tp:tp>100?tp.toFixed(2):tp.toFixed(4),
@@ -789,7 +793,7 @@ function renderResults(){
     </div>
     <div class="tbl-scroll">
     <table>
-      <thead><tr><th>#</th><th>Thời gian</th><th>Giá vào</th><th>RSI</th><th>TP</th><th>SL</th><th>PnL</th><th>KQ</th></tr></thead>
+      <thead><tr><th>#</th><th>Vào lệnh</th><th>Thoát lệnh</th><th>Giá vào</th><th>RSI</th><th>TP</th><th>SL</th><th>PnL</th><th>KQ</th></tr></thead>
       <tbody>`;
   trades.forEach((t,i)=>{
     const pnlStr=t.pnl===null?'—':(t.pnl>0?'+':'')+t.pnl+'%';
@@ -798,6 +802,7 @@ function renderResults(){
     html+=`<tr>
       <td style="color:var(--dim)">${i+1}</td>
       <td style="color:var(--dim)">${t.time}</td>
+      <td style="color:var(--dim)">${t.exitTime||'—'}</td>
       <td>${t.entry}</td>
       <td style="color:var(--acc)">${t.rsi}</td>
       <td style="color:var(--grn)">${t.tp}</td>
