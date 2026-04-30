@@ -1,0 +1,1336 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<title>RSI Backtester — Binance 1H</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Outfit:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg0:#050510;--bg1:#0a0a1c;--bg2:#0f0f24;--bg3:#16162e;
+  --b1:#1c1c38;--b2:#28285a;--b3:#3a3a70;
+  --txt:#cccce8;--dim:#606080;--hi:#e8e8ff;
+  --grn:#00f085;--red:#ff3d55;--ora:#ff9020;
+  --acc:#7c6fff;--cyn:#00cfff;
+  --grn-bg:#061a0f;--red-bg:#1a0608;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html{min-height:100%;}
+body{
+  background:var(--bg0);color:var(--txt);
+  font-family:'Outfit',sans-serif;font-size:14px;
+  padding:env(safe-area-inset-top,16px) 16px 60px;
+  -webkit-font-smoothing:antialiased;
+}
+/* bg grid texture */
+body::before{
+  content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:
+    linear-gradient(var(--b1) 1px,transparent 1px),
+    linear-gradient(90deg,var(--b1) 1px,transparent 1px);
+  background-size:40px 40px;opacity:.4;
+}
+#app{position:relative;z-index:1;max-width:600px;margin:0 auto;}
+
+/* ── HEADER ── */
+.hdr{display:flex;align-items:center;gap:12px;padding:20px 0 22px;}
+.hdr-stripe{
+  width:4px;height:40px;border-radius:4px;flex-shrink:0;
+  background:linear-gradient(180deg,var(--acc) 0%,var(--cyn) 100%);
+  box-shadow:0 0 16px var(--acc);
+}
+.hdr-title{font-size:20px;font-weight:900;color:var(--hi);letter-spacing:-.5px;}
+.hdr-sub{font-size:10px;color:var(--dim);letter-spacing:2px;margin-top:2px;text-transform:uppercase;}
+.add-btn{
+  margin-left:auto;background:transparent;border:1px solid var(--b2);
+  border-radius:8px;color:var(--acc);padding:8px 14px;
+  cursor:pointer;font:700 12px/1 'Outfit',sans-serif;letter-spacing:.5px;
+  transition:all .15s;
+}
+.add-btn:hover{background:var(--bg3);border-color:var(--acc);}
+
+/* ── CARD ── */
+.card{
+  background:var(--bg1);border:1px solid var(--b1);
+  border-radius:16px;padding:16px;margin-bottom:14px;
+  backdrop-filter:blur(8px);
+}
+
+/* ── SESSION TABS ── */
+.sess-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+.sess-tab{
+  background:var(--bg1);border:1px solid var(--b1);
+  border-radius:10px;padding:9px 14px;cursor:pointer;
+  display:flex;align-items:center;gap:7px;transition:all .15s;
+}
+.sess-tab.on{background:rgba(124,111,255,.12);border-color:var(--acc);}
+.tab-lbl{font-size:13px;font-weight:700;color:var(--dim);}
+.sess-tab.on .tab-lbl{color:var(--hi);}
+.dir-pill{font-size:10px;padding:2px 7px;border-radius:4px;font-weight:700;letter-spacing:.5px;}
+.dp-buy {background:var(--grn-bg);color:var(--grn);}
+.dp-sell{background:var(--red-bg);color:#ff8899;}
+.tab-x{color:var(--b2);font-size:15px;cursor:pointer;transition:color .1s;}
+.tab-x:hover{color:var(--red);}
+
+/* ── FORM ── */
+.flbl{font-size:10px;color:var(--acc);font-weight:700;letter-spacing:2px;text-transform:uppercase;margin-bottom:6px;}
+.fgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+.fgrid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;}
+input[type=text],input[type=number]{
+  width:100%;background:var(--bg2);border:1.5px solid var(--b2);border-radius:9px;
+  color:var(--hi);padding:10px 12px;font-size:13px;outline:none;
+  font-family:'JetBrains Mono',monospace;transition:border-color .15s;
+  -webkit-appearance:none;
+}
+input:focus{border-color:var(--acc);}
+input[type=number]{-moz-appearance:textfield;}
+input[type=number]::-webkit-inner-spin-button{display:none;}
+.dir-row{display:flex;gap:8px;margin-bottom:14px;}
+.dir-opt{
+  flex:1;padding:10px 8px;border-radius:9px;cursor:pointer;
+  font:700 12px/1 'Outfit',sans-serif;transition:all .15s;
+  border:1.5px solid var(--b2);background:var(--bg2);color:var(--dim);
+}
+.dir-opt.buy.on {background:var(--grn-bg);border-color:var(--grn);color:var(--grn);}
+.dir-opt.sell.on{background:var(--red-bg);border-color:#ff4466;color:#ff9999;}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+.chip{
+  background:var(--bg2);border:1px solid var(--b1);
+  border-radius:8px;padding:7px 12px;font-size:12px;
+}
+.chip-v{font-family:'JetBrains Mono',monospace;font-weight:700;}
+
+/* RSI level row */
+.rsi-row{display:flex;align-items:center;gap:10px;margin-bottom:14px;}
+.rsi-label-wrap{flex:1;}
+.rsi-input-wrap{display:flex;align-items:center;gap:6px;}
+.rsi-input-wrap input{width:72px;text-align:center;}
+.rsi-hint{font-size:11px;color:var(--dim);}
+
+/* ── RUN BTN ── */
+.run-btn{
+  width:100%;padding:13px;border-radius:11px;border:none;
+  font:900 14px/1 'Outfit',sans-serif;letter-spacing:1px;cursor:pointer;
+  background:linear-gradient(135deg,var(--acc),var(--cyn));
+  color:#fff;transition:all .2s;
+  box-shadow:0 4px 20px rgba(124,111,255,.3);
+}
+.run-btn:disabled{background:var(--bg3);color:var(--dim);cursor:not-allowed;box-shadow:none;}
+.run-btn:not(:disabled):active{transform:scale(.98);}
+
+/* ── STATUS / ERROR ── */
+.status-box{background:var(--bg2);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--acc);display:flex;align-items:center;gap:8px;}
+.err-box{background:var(--red-bg);border:1px solid var(--red);border-radius:9px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:var(--red);}
+
+/* ── COIN TABS ── */
+.coin-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+.coin-tab{
+  background:var(--bg1);border:1px solid var(--b1);
+  border-radius:10px;padding:9px 14px;cursor:pointer;transition:all .15s;
+}
+.coin-tab.on{background:rgba(124,111,255,.12);border-color:var(--acc);}
+.c-name{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:12px;color:var(--dim);}
+.coin-tab.on .c-name{color:var(--hi);}
+.c-wr{font-size:11px;margin-left:5px;}
+
+/* ── STAT CARDS ── */
+.stats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+.sc{background:var(--bg2);border:1px solid var(--b1);border-radius:11px;padding:11px 13px;min-width:80px;}
+.sc-lbl{font-size:9px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-bottom:5px;}
+.sc-val{font-size:21px;font-weight:800;font-family:'JetBrains Mono',monospace;}
+
+/* ── WIN BAR ── */
+.wbar-wrap{background:var(--bg2);border:1px solid var(--b1);border-radius:10px;padding:12px 14px;margin-bottom:14px;}
+.wbar-lbl{font-size:9px;color:var(--dim);letter-spacing:2px;margin-bottom:8px;}
+.wbar{display:flex;height:22px;border-radius:6px;overflow:hidden;}
+.ws{display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;}
+.ws-w{background:linear-gradient(90deg,#00f085,#00cc66);}
+.ws-l{background:linear-gradient(90deg,#cc1133,#ff3d55);}
+
+/* ── TABLE ── */
+.tbl-wrap{background:var(--bg1);border:1px solid var(--b1);border-radius:14px;overflow:hidden;margin-bottom:18px;}
+.tbl-hdr{padding:11px 15px;border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;}
+.tbl-title{font-size:11px;color:var(--acc);font-weight:700;letter-spacing:1px;}
+.tbl-cnt{font-size:11px;color:var(--dim);}
+.tbl-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+table{width:100%;border-collapse:collapse;}
+th{padding:7px 7px;text-align:left;color:var(--dim);font-size:10px;font-weight:600;border-bottom:1px solid var(--b1);background:var(--bg2);white-space:nowrap;}
+td{padding:6px 7px;border-bottom:1px solid #0c0c20;font-family:'JetBrains Mono',monospace;font-size:10px;white-space:nowrap;}
+tr:last-child td{border-bottom:none;}
+tr:nth-child(even) td{background:rgba(16,16,36,.6);}
+.badge{border-radius:4px;padding:2px 7px;font-size:10px;font-weight:700;letter-spacing:1px;border-width:1px;border-style:solid;display:inline-block;}
+.bw{background:var(--grn-bg);color:var(--grn);border-color:var(--grn);}
+.bl{background:var(--red-bg);color:var(--red);border-color:var(--red);}
+.bo{background:#111;color:#666;border-color:#333;}
+.more-btn{
+  width:100%;padding:11px;border:none;background:none;cursor:pointer;
+  color:var(--acc);font:700 11px/1 'Outfit',sans-serif;letter-spacing:1px;
+  border-top:1px solid var(--b1);transition:background .15s;
+}
+.more-btn:hover{background:var(--bg2);}
+
+/* ── SUMMARY ── */
+.sum-wrap{background:var(--bg1);border:1px solid var(--b1);border-radius:14px;overflow:hidden;margin-bottom:18px;}
+.sum-title{padding:11px 15px;font-size:11px;color:var(--acc);font-weight:700;letter-spacing:1px;border-bottom:1px solid var(--b1);}
+
+/* ── EMPTY ── */
+.empty{text-align:center;padding:48px 20px;}
+.empty-ico{font-size:38px;margin-bottom:12px;}
+.empty-txt{font-size:14px;color:#444;line-height:1.6;}
+
+/* ── TOGGLE SWITCH ── */
+.toggle-row{display:flex;align-items:center;justify-content:space-between;background:var(--bg2);border:1.5px solid var(--b2);border-radius:10px;padding:11px 14px;margin-bottom:14px;cursor:pointer;transition:border-color .15s;}
+.toggle-row.on{border-color:var(--acc);}
+.toggle-info{flex:1;}
+.toggle-title{font-size:13px;font-weight:700;color:var(--txt);}
+.toggle-desc{font-size:11px;color:var(--dim);margin-top:3px;}
+.toggle-sw{width:42px;height:24px;border-radius:12px;background:var(--b2);position:relative;flex-shrink:0;transition:background .2s;}
+.toggle-sw.on{background:var(--acc);}
+.toggle-sw::after{content:'';position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .2s;box-shadow:0 1px 4px rgba(0,0,0,.4);}
+.toggle-sw.on::after{transform:translateX(18px);}
+
+/* ── FOOTER ── */
+.footer{text-align:center;font-size:10px;color:#222;margin-top:16px;}
+
+/* ── OPTIMIZER ── */
+.opt-card{background:linear-gradient(135deg,rgba(124,111,255,.08),rgba(0,207,255,.05));border:1px solid var(--acc);border-radius:16px;padding:16px;margin-bottom:14px;}
+.opt-title{font-size:13px;font-weight:900;color:var(--acc);letter-spacing:1px;margin-bottom:4px;}
+.opt-sub{font-size:11px;color:var(--dim);margin-bottom:14px;}
+.opt-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;}
+.opt-run{width:100%;padding:12px;border-radius:10px;border:none;font:800 13px/1 'Outfit',sans-serif;letter-spacing:1px;cursor:pointer;background:linear-gradient(135deg,#7c6fff,#00cfff);color:#fff;transition:all .2s;box-shadow:0 4px 20px rgba(124,111,255,.3);}
+.opt-run:disabled{background:var(--bg3);color:var(--dim);cursor:not-allowed;box-shadow:none;}
+.opt-progress{background:var(--bg2);border-radius:8px;overflow:hidden;height:6px;margin-bottom:10px;}
+.opt-bar{height:100%;background:linear-gradient(90deg,var(--acc),var(--cyn));transition:width .1s;}
+.opt-result-wrap{background:var(--bg1);border:1px solid var(--b1);border-radius:12px;overflow:hidden;margin-top:14px;}
+.opt-result-hdr{padding:11px 15px;border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;}
+.sort-btn{background:var(--bg2);border:1px solid var(--b1);border-radius:6px;color:var(--dim);padding:4px 10px;font-size:11px;cursor:pointer;font-family:inherit;}
+.sort-btn.on{border-color:var(--acc);color:var(--acc);}
+
+@media(max-width:380px){
+  .fgrid{grid-template-columns:1fr;}
+  .fgrid3{grid-template-columns:1fr 1fr;}
+  .sc-val{font-size:18px;}
+  .opt-grid{grid-template-columns:1fr;}
+}
+/* Ẩn TP/SL trên màn hình nhỏ — đã hiện ở chip bên trên */
+@media(max-width:700px){
+  .hide-sm{display:none;}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="hdr">
+    <div class="hdr-stripe"></div>
+    <div>
+      <div class="hdr-title">RSI Backtester</div>
+      <div class="hdr-sub">Binance · 1H · TP +3% / SL -1.5%</div>
+    </div>
+    <button class="add-btn" onclick="addSession()">+ Phiên</button>
+  </div>
+
+  <div id="sessTabs" class="sess-tabs"></div>
+  <div id="configCard" class="card"></div>
+  <div id="results"></div>
+
+  <!-- ── OPTIMIZER SECTION ── -->
+  <div id="optimizerSection" style="margin-top:8px;"></div>
+
+  <div class="footer">⚠ Backtest chỉ mang tính tham khảo – không phải tư vấn đầu tư.</div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════
+let sid = 1, sessions = [mkSess(1)];
+let results = {}, revResults = {}, errors = {}, statusMsg = '';
+let activeS = 1, activeC = null;
+let expanded = new Set(), loading = false;
+
+function mkSess(id){
+  return { id, label:'Phiên '+id,
+    coins:'BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT',
+    start:'13/04/2025', end:todayStr(),
+    dir:'buy', rsiLevel:50,
+    tp:3, sl:1.5, singleMode:true, reverseMode:false, flipWindow:5, rsiPeriod:14, macdMode:'none' };
+}
+function todayStr(){
+  const n=new Date();
+  return pad(n.getDate())+'/'+pad(n.getMonth()+1)+'/'+n.getFullYear();
+}
+function pad(n){return String(n).padStart(2,'0');}
+
+// ══════════════════════════════════════════════
+//  RSI
+// ══════════════════════════════════════════════
+function calcRSI(closes, period){
+  period = period||14;
+  const rsi = new Array(closes.length).fill(null);
+  if(closes.length < period+1) return rsi;
+  let g=0,l=0;
+  for(let i=1;i<=period;i++){const d=closes[i]-closes[i-1];d>0?g+=d:l-=d;}
+  let ag=g/period,al=l/period;
+  rsi[period]=al===0?100:100-100/(1+ag/al);
+  for(let i=period+1;i<closes.length;i++){
+    const d=closes[i]-closes[i-1];
+    ag=(ag*(period-1)+(d>0?d:0))/period;
+    al=(al*(period-1)+(d<0?-d:0))/period;
+    rsi[i]=al===0?100:100-100/(1+ag/al);
+  }
+  return rsi;
+}
+
+// ══════════════════════════════════════════════
+//  BACKTEST
+// ══════════════════════════════════════════════
+function backtest(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, singleMode, rsiPeriod){
+  const closes=candles.map(c=>parseFloat(c[4]));
+  const highs =candles.map(c=>parseFloat(c[2]));
+  const lows  =candles.map(c=>parseFloat(c[3]));
+  const times =candles.map(c=>c[0]);
+  const rsi   =calcRSI(closes, rsiPeriod||14);
+  const trades=[];
+  let lastCloseBar=-1; // bar index khi lệnh trước đóng
+
+  for(let i=16;i<candles.length-1;i++){
+    if(!rsi[i-1]||!rsi[i]) continue;
+    if(times[i]<startTs||times[i]>endTs) continue;
+
+    // Bỏ qua nếu singleMode và lệnh trước chưa đóng
+    if(singleMode && i<=lastCloseBar) continue;
+
+    const sig = dir==='buy'
+      ? (rsi[i-1]<rsiLevel && rsi[i]>rsiLevel)
+      : (rsi[i-1]>rsiLevel && rsi[i]<rsiLevel);
+    if(!sig) continue;
+
+    const entry=closes[i];
+    const tp=dir==='buy'?entry*(1+tpPct/100):entry*(1-tpPct/100);
+    const sl=dir==='buy'?entry*(1-slPct/100):entry*(1+slPct/100);
+    let result='OPEN',pnl=null,exitBar=-1;
+
+    for(let j=i+1;j<candles.length;j++){
+      if(dir==='buy'){
+        if(highs[j]>=tp){result='WIN';pnl=tpPct;exitBar=j;break;}
+        if(lows[j]<=sl){result='LOSS';pnl=-slPct;exitBar=j;break;}
+      } else {
+        if(lows[j]<=tp){result='WIN';pnl=tpPct;exitBar=j;break;}
+        if(highs[j]>=sl){result='LOSS';pnl=-slPct;exitBar=j;break;}
+      }
+    }
+
+    // Cập nhật lastCloseBar để chặn lệnh trùng
+    if(singleMode){
+      lastCloseBar = exitBar>0 ? exitBar : candles.length;
+    }
+
+    const d=new Date(times[i]);
+    const exitTime = exitBar>0
+      ? (()=>{ const e=new Date(times[exitBar]); return pad(e.getDate())+'/'+pad(e.getMonth()+1)+' '+pad(e.getHours())+':'+pad(e.getMinutes()); })()
+      : '—';
+    trades.push({
+      time:pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes()),
+      exitTime,
+      entry:entry>100?entry.toFixed(2):entry.toFixed(4),
+      rsi:rsi[i].toFixed(2),
+      tp:tp>100?tp.toFixed(2):tp.toFixed(4),
+      sl:sl>100?sl.toFixed(2):sl.toFixed(4),
+      result, pnl
+    });
+  }
+  return trades;
+}
+
+function summarize(trades){
+  const wins=trades.filter(t=>t.result==='WIN').length;
+  const losses=trades.filter(t=>t.result==='LOSS').length;
+  const closed=wins+losses;
+  const totalPnl=trades.reduce((s,t)=>s+(t.pnl||0),0);
+  return {trades,wins,losses,closed,totalPnl};
+}
+
+// ══════════════════════════════════════════════
+//  BACKTEST REVERSE — đảo chiều khi 5 lệnh LOSS > WIN
+// ══════════════════════════════════════════════
+function backtestReverse(candles, startDir, startTs, endTs, rsiLevel, tpPct, slPct, singleMode, flipWindow){
+  flipWindow = parseInt(flipWindow)||5;
+  const closes=candles.map(c=>parseFloat(c[4]));
+  const highs =candles.map(c=>parseFloat(c[2]));
+  const lows  =candles.map(c=>parseFloat(c[3]));
+  const times =candles.map(c=>c[0]);
+  const rsi   =calcRSI(closes);
+
+  // Pre-compute tín hiệu cả 2 chiều
+  const sigs=new Array(candles.length).fill(null);
+  for(let i=16;i<candles.length-1;i++){
+    if(!rsi[i-1]||!rsi[i]) continue;
+    if(times[i]<startTs||times[i]>endTs) continue;
+    if(rsi[i-1]<rsiLevel&&rsi[i]>rsiLevel) sigs[i]='buy';
+    else if(rsi[i-1]>rsiLevel&&rsi[i]<rsiLevel) sigs[i]='sell';
+  }
+
+  const trades=[];
+  let curDir=startDir;
+  let lastCloseBar=-1;
+  let flipCount=0;
+  let lastFlipIdx=0; // reset đếm sau mỗi lần flip
+
+  for(let i=16;i<candles.length-1;i++){
+    if(singleMode && i<=lastCloseBar) continue;
+    if(sigs[i]!==curDir) continue;
+
+    const entry=closes[i];
+    const tp=curDir==='buy'?entry*(1+tpPct/100):entry*(1-tpPct/100);
+    const sl=curDir==='buy'?entry*(1-slPct/100):entry*(1+slPct/100);
+    let result='OPEN',pnl=null,exitBar=-1;
+
+    for(let j=i+1;j<candles.length;j++){
+      if(curDir==='buy'){
+        if(highs[j]>=tp){result='WIN';pnl=tpPct;exitBar=j;break;}
+        if(lows[j]<=sl){result='LOSS';pnl=-slPct;exitBar=j;break;}
+      } else {
+        if(lows[j]<=tp){result='WIN';pnl=tpPct;exitBar=j;break;}
+        if(highs[j]>=sl){result='LOSS';pnl=-slPct;exitBar=j;break;}
+      }
+    }
+    if(singleMode) lastCloseBar=exitBar>0?exitBar:candles.length;
+
+    const d=new Date(times[i]);
+    trades.push({
+      time:pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes()),
+      entry:entry>100?entry.toFixed(2):entry.toFixed(4),
+      rsi:rsi[i].toFixed(2), dir:curDir, result, pnl
+    });
+
+    // Flip ngay khi LOSS >= floor(N/2)+1 trong phạm vi N lệnh cùng chiều
+    // N=2→flip khi 2L, N=3→flip khi 2L, N=4→flip khi 3L, N=5→flip khi 3L, N=6→flip khi 4L
+    if(result!=='OPEN'){
+      const tradesAfterFlip=trades.slice(lastFlipIdx).filter(t=>t.result!=='OPEN'&&t.dir===curDir);
+      const lastN=tradesAfterFlip.slice(-flipWindow);
+      const lossCount=lastN.filter(t=>t.result==='LOSS').length;
+      const threshold=Math.floor(flipWindow/2)+1;
+      if(lossCount>=threshold){
+        curDir=curDir==='buy'?'sell':'buy';
+        flipCount++;
+        lastFlipIdx=trades.length;
+      }
+    }
+  }
+  return {trades, flipCount};
+}
+
+// ══════════════════════════════════════════════
+//  FETCH BINANCE
+// ══════════════════════════════════════════════
+async function fetchKlines(symbol, startTs, endTs){
+  const all=[];let cur=startTs;
+  while(cur<endTs){
+    const url=`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&startTime=${cur}&endTime=${endTs}&limit=1000`;
+    const res=await fetch(url);
+    if(!res.ok) throw new Error(symbol+': HTTP '+res.status);
+    const chunk=await res.json();
+    if(!chunk.length) break;
+    all.push(...chunk);
+    setStatus('⏳ '+symbol+': tải '+all.length+' nến...');
+    if(chunk.length<1000) break;
+    cur=chunk[chunk.length-1][0]+1;
+  }
+  return all;
+}
+
+// ══════════════════════════════════════════════
+//  DATE PARSE  dd/mm/yyyy
+// ══════════════════════════════════════════════
+function parseDate(str,end){
+  const p=str.trim().split('/').map(Number);
+  if(p.length!==3||p.some(isNaN)) return null;
+  const[d,m,y]=p;
+  const base=Date.UTC(y<100?2000+y:y,m-1,d)-7*3600000;
+  return end?base+86400000-1:base;
+}
+
+// ══════════════════════════════════════════════
+//  ACTIONS
+// ══════════════════════════════════════════════
+function addSession(){
+  sid++;sessions.push(mkSess(sid));activeS=sid;render();
+}
+function removeSession(id){
+  if(sessions.length<=1) return;
+  sessions=sessions.filter(s=>s.id!==id);delete results[id];delete errors[id];
+  if(activeS===id) activeS=sessions[0].id;
+  render();
+}
+function setField(id,k,v){
+  const s=sessions.find(s=>s.id===id);
+  if(s){s[k]=v;renderConfig();}
+}
+function setStatus(msg){statusMsg=msg;const el=document.getElementById('statusLine');if(el)el.innerHTML=msg;}
+function clearStatus(){statusMsg='';const el=document.getElementById('statusLine');if(el)el.innerHTML='';}
+
+async function runSession(){
+  const session=sessions.find(s=>s.id===activeS);
+  if(!session||loading) return;
+
+  const startTs=parseDate(session.start,false);
+  const endTs  =parseDate(session.end,true);
+
+  if(!startTs||!endTs){errors[activeS]='Ngày không hợp lệ (dd/mm/yyyy)';render();return;}
+  if(startTs>endTs){errors[activeS]='Ngày bắt đầu phải trước kết thúc';render();return;}
+  if(parseFloat(session.rsiLevel)<1||parseFloat(session.rsiLevel)>99){errors[activeS]='RSI Level phải từ 1–99';render();return;}
+  if(parseFloat(session.tp)<=0||parseFloat(session.sl)<=0){errors[activeS]='TP và SL phải lớn hơn 0';render();return;}
+
+  delete errors[activeS];
+  loading=true;render();
+
+  const syms=session.coins.split(',').map(s=>s.trim().toUpperCase()).filter(Boolean).slice(0,5);
+  const res={}, revRes={};
+  const rsiPeriod=parseInt(session.rsiPeriod)||14;
+  const macdMode=session.macdMode||'none';
+
+  // Fetch 1D nếu cần MACD
+  let sessionMacdMap=null;
+  if(macdMode!=='none'){
+    try{
+      setStatus('⏳ Đang tải nến 1D cho MACD...');
+      const startD=startTs-60*86400000;
+      // Fetch 1D cho coin đầu tiên (dùng chung map cho tất cả coin)
+      // Mỗi coin sẽ fetch 1D riêng bên dưới
+    } catch(e){}
+  }
+
+  try{
+    for(const sym of syms){
+      setStatus('⏳ '+sym+': đang kết nối Binance...');
+      const candles=await fetchKlines(sym,startTs,endTs);
+
+      // Fetch 1D và build MACD map nếu cần
+      let macdMap=null;
+      if(macdMode!=='none'){
+        setStatus('⏳ '+sym+': đang tải nến 1D (MACD)...');
+        const startD=startTs-60*86400000;
+        const url1D=`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=1d&startTime=${startD}&endTime=${endTs}&limit=1000`;
+        const r1D=await fetch(url1D);
+        if(r1D.ok){ const c1D=await r1D.json(); macdMap=buildMacdMap(c1D); }
+      }
+
+      // Chạy backtest với filter tương ứng
+      let trades;
+      if(macdMode!=='none' && macdMap){
+        // Tạo macdMap filter theo mode pos/neg
+        const filteredMap=new Map();
+        macdMap.forEach((v,k)=>{
+          if(macdMode==='pos' && v>0) filteredMap.set(k,v);
+          else if(macdMode==='neg' && v<0) filteredMap.set(k,v);
+        });
+        trades=backtestWithMacd(candles,session.dir,startTs,endTs,
+          parseFloat(session.rsiLevel)||50,
+          parseFloat(session.tp)||3,
+          parseFloat(session.sl)||1.5,
+          session.singleMode, rsiPeriod, filteredMap);
+      } else {
+        trades=backtest(candles,session.dir,startTs,endTs,
+          parseFloat(session.rsiLevel)||50,
+          parseFloat(session.tp)||3,
+          parseFloat(session.sl)||1.5,
+          session.singleMode, rsiPeriod);
+      }
+      res[sym]=summarize(trades);
+      if(session.reverseMode){
+        const rv=backtestReverse(candles,session.dir,startTs,endTs,
+          parseFloat(session.rsiLevel)||50,
+          parseFloat(session.tp)||3,
+          parseFloat(session.sl)||1.5,
+          session.singleMode,
+          parseInt(session.flipWindow)||5);
+        revRes[sym]=summarize(rv.trades);
+        revRes[sym].flipCount=rv.flipCount;
+        revRes[sym].singleRef=res[sym]; // so sánh với original cùng config
+      }
+    }
+    results[activeS]=res;
+    revResults[activeS]=session.reverseMode?revRes:null;
+    activeC=syms[0];
+  } catch(e){
+    errors[activeS]=e.message;
+  }
+  loading=false;clearStatus();render();
+}
+
+// ══════════════════════════════════════════════
+//  RENDER
+// ══════════════════════════════════════════════
+function render(){renderTabs();renderConfig();renderResults();}
+
+function renderTabs(){
+  const el=document.getElementById('sessTabs');
+  el.innerHTML=sessions.map(s=>`
+    <div class="sess-tab ${s.id===activeS?'on':''}" onclick="activeS=${s.id};render()">
+      <span class="tab-lbl">${esc(s.label)}</span>
+      <span class="dir-pill dp-${s.dir}">${s.dir==='buy'?'▲ BUY':'▼ SELL'}</span>
+      ${sessions.length>1?`<span class="tab-x" onclick="event.stopPropagation();removeSession(${s.id})">✕</span>`:''}
+    </div>`).join('');
+}
+
+function renderConfig(){
+  const s=sessions.find(s=>s.id===activeS);if(!s) return;
+  const dir=s.dir;
+  const tpPct=parseFloat(s.tp)||3;
+  const slPct=parseFloat(s.sl)||1.5;
+  const rrRaw=(tpPct/slPct).toFixed(1);
+  const tpSign=dir==='buy'?'+':'-';
+  const slSign=dir==='buy'?'-':'+';
+
+  document.getElementById('configCard').innerHTML=`
+    <div style="margin-bottom:14px">
+      <div class="flbl">Tên phiên</div>
+      <input type="text" value="${esc(s.label)}" oninput="setField(${s.id},'label',this.value)" style="max-width:220px">
+    </div>
+    <div class="fgrid">
+      <div><div class="flbl">Từ ngày</div><input type="text" value="${esc(s.start)}" oninput="setField(${s.id},'start',this.value)" placeholder="13/04/2025"></div>
+      <div><div class="flbl">Đến ngày</div><input type="text" value="${esc(s.end)}"  oninput="setField(${s.id},'end',this.value)"   placeholder="${todayStr()}"></div>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <div class="flbl">Hướng tín hiệu RSI</div>
+      <div class="dir-row">
+        <button class="dir-opt buy ${dir==='buy'?'on':''}"  onclick="setField(${s.id},'dir','buy')">▲ Hất lên (BUY)</button>
+        <button class="dir-opt sell ${dir==='sell'?'on':''}" onclick="setField(${s.id},'dir','sell')">▼ Hất xuống (SELL)</button>
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <div class="flbl">Ngưỡng RSI cắt qua</div>
+      <div class="rsi-row">
+        <div class="rsi-label-wrap">
+          <div style="font-size:12px;color:var(--txt)">RSI(${s.rsiPeriod}) ${dir==='buy'?'cắt lên':'cắt xuống'} ngưỡng này</div>
+          <div class="rsi-hint">Mặc định 50 · Nhập từ 1–99</div>
+        </div>
+        <div class="rsi-input-wrap">
+          <input type="number" min="1" max="99" step="1" value="${s.rsiLevel}" oninput="setField(${s.id},'rsiLevel',this.value)">
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <div class="flbl">RSI Period (nến 1H)</div>
+      <div style="display:flex;gap:8px;">
+        ${[7,10,14,21].map(p=>`
+          <button onclick="setField(${s.id},'rsiPeriod',${p})" style="
+            flex:1;padding:9px 4px;border-radius:8px;cursor:pointer;
+            font:700 14px/1 'JetBrains Mono',monospace;
+            background:${s.rsiPeriod==p?'rgba(124,111,255,.2)':'var(--bg2)'};
+            border:1.5px solid ${s.rsiPeriod==p?'var(--acc)':'var(--b2)'};
+            color:${s.rsiPeriod==p?'var(--acc)':'var(--dim)'};
+            transition:all .15s;">${p}</button>
+        `).join('')}
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <div class="flbl">MACD Filter (nến 1D)</div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="setField(${s.id},'macdMode','none')" style="
+          flex:1;padding:9px 6px;border-radius:8px;cursor:pointer;
+          font:700 11px/1 'Outfit',sans-serif;
+          background:${s.macdMode==='none'?'rgba(96,96,128,.3)':'var(--bg2)'};
+          border:1.5px solid ${s.macdMode==='none'?'var(--dim)':'var(--b2)'};
+          color:${s.macdMode==='none'?'var(--txt)':'var(--dim)'};
+          transition:all .15s;">— Không dùng</button>
+        <button onclick="setField(${s.id},'macdMode','pos')" style="
+          flex:1;padding:9px 6px;border-radius:8px;cursor:pointer;
+          font:700 11px/1 'Outfit',sans-serif;
+          background:${s.macdMode==='pos'?'rgba(0,240,133,.1)':'var(--bg2)'};
+          border:1.5px solid ${s.macdMode==='pos'?'var(--grn)':'var(--b2)'};
+          color:${s.macdMode==='pos'?'var(--grn)':'var(--dim)'};
+          transition:all .15s;">▲ Hist dương</button>
+        <button onclick="setField(${s.id},'macdMode','neg')" style="
+          flex:1;padding:9px 6px;border-radius:8px;cursor:pointer;
+          font:700 11px/1 'Outfit',sans-serif;
+          background:${s.macdMode==='neg'?'rgba(255,61,85,.1)':'var(--bg2)'};
+          border:1.5px solid ${s.macdMode==='neg'?'var(--red)':'var(--b2)'};
+          color:${s.macdMode==='neg'?'var(--red)':'var(--dim)'};
+          transition:all .15s;">▼ Hist âm</button>
+      </div>
+      <div style="font-size:10px;color:var(--dim);margin-top:5px;">
+        ${s.macdMode==='none'?'Không lọc theo MACD — trade tất cả tín hiệu RSI':
+          s.macdMode==='pos'?'Chỉ trade khi MACD 1D histogram dương (▲ xu hướng tăng)':
+          'Chỉ trade khi MACD 1D histogram âm (▼ xu hướng giảm)'}
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <div class="flbl">Take Profit &amp; Stop Loss (%)</div>
+      <div class="fgrid">
+        <div>
+          <div style="font-size:11px;color:var(--grn);margin-bottom:5px;">▲ Take Profit %</div>
+          <input type="number" min="0.1" max="100" step="0.1" value="${tpPct}" oninput="setField(${s.id},'tp',this.value)" placeholder="3">
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--red);margin-bottom:5px;">▼ Stop Loss %</div>
+          <input type="number" min="0.1" max="100" step="0.1" value="${slPct}" oninput="setField(${s.id},'sl',this.value)" placeholder="1.5">
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px">
+      <div class="flbl">Danh sách coin (tối đa 5)</div>
+      <input type="text" value="${esc(s.coins)}" oninput="setField(${s.id},'coins',this.value)">
+    </div>
+
+    <div class="toggle-row ${s.singleMode?'on':''}" onclick="setField(${s.id},'singleMode',!sessions.find(x=>x.id===${s.id}).singleMode)">
+      <div class="toggle-info">
+        <div class="toggle-title">1 lệnh / 1 thời điểm</div>
+        <div class="toggle-desc">${s.singleMode
+          ? '✅ Bỏ qua tín hiệu mới khi lệnh cũ chưa đóng — sát thực tế nhất'
+          : '⚠️ Tính tất cả tín hiệu kể cả trùng — kết quả lạc quan hơn thực tế'}</div>
+      </div>
+      <div class="toggle-sw ${s.singleMode?'on':''}"></div>
+    </div>
+
+    <div class="toggle-row ${s.reverseMode?'on':''}" onclick="setField(${s.id},'reverseMode',!sessions.find(x=>x.id===${s.id}).reverseMode)">
+      <div class="toggle-info">
+        <div class="toggle-title">Đảo chiều theo lệnh liên tiếp cùng chiều</div>
+        <div class="toggle-desc">${s.reverseMode
+          ? '✅ Tự đảo BUY↔SELL khi LOSS > WIN — hiện thống kê riêng bên dưới'
+          : '⭕ Bật để mô phỏng chiến lược đảo chiều động'}</div>
+      </div>
+      <div class="toggle-sw ${s.reverseMode?'on':''}"></div>
+    </div>
+
+    ${s.reverseMode ? `
+    <div style="background:rgba(0,207,255,.06);border:1.5px solid var(--cyn);border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;gap:14px;">
+      <div style="flex:1;">
+        <div style="font-size:11px;color:var(--cyn);font-weight:700;letter-spacing:1px;margin-bottom:3px;">SỐ LỆNH CÙNG CHIỀU ĐỂ XÉT ĐẢO</div>
+        <div style="font-size:11px;color:var(--dim);">Khi đủ N lệnh cùng BUY hoặc SELL có LOSS > WIN → đảo chiều</div>
+      </div>
+      <input type="number" min="2" max="20" step="1" value="${s.flipWindow}"
+        oninput="setField(${s.id},'flipWindow',parseInt(this.value)||5)"
+        style="width:64px;text-align:center;background:var(--bg2);border:2px solid var(--cyn);border-radius:10px;
+               color:var(--cyn);padding:8px 4px;font-size:22px;font-weight:800;outline:none;
+               font-family:'JetBrains Mono',monospace;flex-shrink:0;">
+    </div>` : ''}
+
+    <div class="chips" style="margin-bottom:14px">
+      <div class="chip">TP: <span class="chip-v" style="color:var(--grn)">${tpSign}${tpPct}%</span></div>
+      <div class="chip">SL: <span class="chip-v" style="color:var(--red)">${slSign}${slPct}%</span></div>
+      <div class="chip">R:R <span class="chip-v" style="color:var(--dim)">1:${rrRaw}</span></div>
+      <div class="chip">RSI <span class="chip-v" style="color:var(--acc)">${s.rsiLevel}</span></div>
+      <div class="chip">Period <span class="chip-v" style="color:var(--acc)">${s.rsiPeriod}</span></div>
+      <div class="chip">MACD <span class="chip-v" style="color:${s.macdMode==='none'?'var(--dim)':s.macdMode==='pos'?'var(--grn)':'var(--red)'}">
+        ${s.macdMode==='none'?'OFF':s.macdMode==='pos'?'▲ DƯƠNG':'▼ ÂM'}
+      </span></div>
+      <div class="chip">Mode <span class="chip-v" style="color:${s.singleMode?'var(--grn)':'var(--ora)'}">${s.singleMode?'SINGLE':'MULTI'}</span></div>
+    </div>
+
+    ${statusMsg?`<div class="status-box" id="statusLine">${statusMsg}</div>`:'<div id="statusLine"></div>'}
+    ${errors[s.id]?`<div class="err-box">⚠ ${esc(errors[s.id])}</div>`:''}
+
+    <button class="run-btn" onclick="runSession()" ${loading?'disabled':''}>
+      ${loading?'⏳ Đang phân tích…':'▶ RUN BACKTEST'}
+    </button>`;
+}
+
+function renderResults(){
+  const el=document.getElementById('results');
+  const res=results[activeS];
+  const sess=sessions.find(s=>s.id===activeS);
+  if(!res){el.innerHTML='';return;}
+
+  const syms=Object.keys(res);
+  if(!activeC||!res[activeC]) activeC=syms[0];
+
+  // Coin tabs
+  let html=`<div class="coin-tabs">`;
+  syms.forEach(sym=>{
+    const d=res[sym];
+    const wr=d.closed>0?(d.wins/d.closed*100).toFixed(1):'—';
+    const wrColor=parseFloat(wr)>=50?'var(--grn)':'var(--ora)';
+    html+=`<div class="coin-tab ${sym===activeC?'on':''}" onclick="activeC='${sym}';renderResults()">
+      <span class="c-name">${sym.replace('USDT','')}</span>
+      <span class="c-wr" style="color:${wrColor}">WR ${wr}%</span>
+    </div>`;
+  });
+  html+='</div>';
+
+  const d=res[activeC];
+
+  // Stat cards
+  const wr=d.closed>0?(d.wins/d.closed*100).toFixed(1)+'%':'—';
+  const wrColor=d.closed>0&&d.wins/d.closed>=0.5?'var(--grn)':'var(--ora)';
+  const pnlColor=d.totalPnl>=0?'var(--grn)':'var(--red)';
+  const pnlStr=(d.totalPnl>=0?'+':'')+d.totalPnl.toFixed(2)+'%';
+  html+=`<div class="stats">
+    <div class="sc"><div class="sc-lbl">Tín hiệu</div><div class="sc-val">${d.trades.length}</div></div>
+    <div class="sc"><div class="sc-lbl">Đóng</div><div class="sc-val">${d.closed}</div></div>
+    <div class="sc"><div class="sc-lbl">Thắng</div><div class="sc-val" style="color:var(--grn)">${d.wins}</div></div>
+    <div class="sc"><div class="sc-lbl">Thua</div><div class="sc-val" style="color:var(--red)">${d.losses}</div></div>
+    <div class="sc"><div class="sc-lbl">Win Rate</div><div class="sc-val" style="color:${wrColor}">${wr}</div></div>
+    <div class="sc"><div class="sc-lbl">Tổng PnL</div><div class="sc-val" style="color:${pnlColor}">${pnlStr}</div></div>
+  </div>`;
+
+  // Win bar
+  if(d.closed>0){
+    const wp=d.wins/d.closed*100, lp=d.losses/d.closed*100;
+    html+=`<div class="wbar-wrap">
+      <div class="wbar-lbl">WIN / LOSS RATIO</div>
+      <div class="wbar">
+        <div class="ws ws-w" style="width:${wp}%">${d.wins>0?'WIN '+d.wins:''}</div>
+        <div class="ws ws-l" style="width:${lp}%;color:#fff">${d.losses>0?'LOSS '+d.losses:''}</div>
+      </div>
+    </div>`;
+  }
+
+  // Trade table
+  const expKey=activeS+'-'+activeC;
+  const showAll=expanded.has(expKey);
+  const trades=showAll?d.trades:d.trades.slice(0,30);
+  const rsiLvl=sess?sess.rsiLevel:50;
+  const modeLabel=sess&&sess.singleMode?'SINGLE':'MULTI';
+  const modeColor=sess&&sess.singleMode?'var(--grn)':'var(--ora)';
+
+  html+=`<div class="tbl-wrap">
+    <div class="tbl-hdr">
+      <span class="tbl-title">${activeC} · ${sess?sess.dir.toUpperCase():''} · RSI ${rsiLvl} · <span style="color:${modeColor}">${modeLabel}</span></span>
+      <span class="tbl-cnt">${d.trades.length} tín hiệu</span>
+    </div>
+    <div class="tbl-scroll">
+    <table>
+      <thead><tr><th>#</th><th>Vào lệnh</th><th>Thoát lệnh</th><th>Giá vào</th><th>RSI</th><th class="hide-sm">TP</th><th class="hide-sm">SL</th><th>PnL</th><th>KQ</th></tr></thead>
+      <tbody>`;
+  trades.forEach((t,i)=>{
+    const pnlStr=t.pnl===null?'—':(t.pnl>0?'+':'')+t.pnl+'%';
+    const pnlColor=t.pnl===null?'var(--dim)':t.pnl>0?'var(--grn)':'var(--red)';
+    const badge=t.result==='WIN'?'bw':t.result==='LOSS'?'bl':'bo';
+    html+=`<tr>
+      <td style="color:var(--dim)">${i+1}</td>
+      <td style="color:var(--dim)">${t.time}</td>
+      <td style="color:var(--dim)">${t.exitTime||'—'}</td>
+      <td>${t.entry}</td>
+      <td style="color:var(--acc)">${t.rsi}</td>
+      <td style="color:var(--grn)" class="hide-sm">${t.tp}</td>
+      <td style="color:var(--red)" class="hide-sm">${t.sl}</td>
+      <td style="color:${pnlColor};font-weight:700">${pnlStr}</td>
+      <td><span class="badge ${badge}">${t.result}</span></td>
+    </tr>`;
+  });
+  html+=`</tbody></table></div>`;
+  if(d.trades.length>30){
+    html+=`<button class="more-btn" onclick="toggleExpand('${expKey}')">
+      ${showAll?'▲ THU GỌN':'▼ XEM THÊM '+(d.trades.length-30)+' GIAO DỊCH'}
+    </button>`;
+  }
+  html+='</div>';
+
+  // Summary all coins
+  html+=`<div class="sum-wrap">
+    <div class="sum-title">TỔNG KẾT TẤT CẢ COIN — ${sess?esc(sess.label):''}</div>
+    <div class="tbl-scroll"><table class="summary-table">
+      <thead><tr><th>Coin</th><th>TH</th><th>Đóng</th><th>WIN</th><th>LOSS</th><th>Win Rate</th><th>PnL</th></tr></thead>
+      <tbody>`;
+  syms.forEach(sym=>{
+    const sd=res[sym];
+    const wr2=sd.closed>0?(sd.wins/sd.closed*100).toFixed(1)+'%':'—';
+    const wrc=parseFloat(wr2)>=50?'var(--grn)':'var(--ora)';
+    const pnl2=(sd.totalPnl>=0?'+':'')+sd.totalPnl.toFixed(2)+'%';
+    const pc=sd.totalPnl>=0?'var(--grn)':'var(--red)';
+    html+=`<tr>
+      <td class="sym">${sym}</td><td>${sd.trades.length}</td><td>${sd.closed}</td>
+      <td style="color:var(--grn);font-weight:700">${sd.wins}</td>
+      <td style="color:var(--red);font-weight:700">${sd.losses}</td>
+      <td style="color:${wrc};font-weight:700">${wr2}</td>
+      <td style="color:${pc};font-weight:700">${pnl2}</td>
+    </tr>`;
+  });
+  html+=`</tbody></table></div></div>`;
+
+  // ── SO SÁNH TRỰC TIẾP ──
+  const revRes=revResults[activeS];
+  if(revRes && revRes[activeC]){
+    const rv=revRes[activeC];
+    // So sánh công bằng: dùng bản SINGLE của original (reverse luôn là SINGLE)
+    const d2=rv.singleRef||res[activeC];
+    const wr1=d2.closed>0?(d2.wins/d2.closed*100).toFixed(1):'—';
+    const wr2=rv.closed>0?(rv.wins/rv.closed*100).toFixed(1):'—';
+    const pnl1=d2.totalPnl, pnl2=rv.totalPnl;
+    const better=pnl2>pnl1?'REVERSE':'ORIGINAL';
+
+    html+=`<div style="background:var(--bg2);border:1px solid var(--b2);border-radius:14px;padding:14px;margin-bottom:18px;">
+      <div style="font-size:11px;color:var(--acc);font-weight:800;letter-spacing:1px;margin-bottom:12px;">
+        ⚖ SO SÁNH — ${activeC}
+        <span style="margin-left:8px;font-size:10px;background:${better==='REVERSE'?'rgba(124,111,255,.2)':'rgba(0,240,133,.15)'};
+          color:${better==='REVERSE'?'var(--acc)':'var(--grn)'};
+          border-radius:4px;padding:2px 8px;">
+          ${better==='REVERSE'?'▲ REVERSE tốt hơn':'▲ ORIGINAL tốt hơn'}
+        </span>
+      </div>
+      <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead><tr>
+          <th style="padding:8px 10px;text-align:left;color:var(--dim);border-bottom:1px solid var(--b1);font-size:10px;letter-spacing:1px;">CHIẾN LƯỢC</th>
+          <th style="padding:8px 10px;text-align:center;color:var(--dim);border-bottom:1px solid var(--b1);font-size:10px;">LỆNH</th>
+          <th style="padding:8px 10px;text-align:center;color:var(--grn);border-bottom:1px solid var(--b1);font-size:10px;">WIN</th>
+          <th style="padding:8px 10px;text-align:center;color:var(--red);border-bottom:1px solid var(--b1);font-size:10px;">LOSS</th>
+          <th style="padding:8px 10px;text-align:center;color:var(--dim);border-bottom:1px solid var(--b1);font-size:10px;">WIN RATE</th>
+          <th style="padding:8px 10px;text-align:center;color:var(--dim);border-bottom:1px solid var(--b1);font-size:10px;">TỔNG PnL</th>
+        </tr></thead>
+        <tbody>
+          <tr style="border-bottom:1px solid var(--b1);">
+            <td style="padding:10px;font-weight:700;color:var(--grn);">1 chiều (${sess?.dir?.toUpperCase()})</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;">${d2.closed}</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;color:var(--grn);font-weight:700;">${d2.wins}</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;color:var(--red);font-weight:700;">${d2.losses}</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;font-weight:700;color:${parseFloat(wr1)>=50?'var(--grn)':'var(--ora)'};">${wr1}%</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;font-weight:800;color:${pnl1>=0?'var(--grn)':'var(--red)'};">${(pnl1>=0?'+':'')+pnl1.toFixed(2)}%</td>
+          </tr>
+          <tr>
+            <td style="padding:10px;font-weight:700;color:var(--acc);">Đảo chiều (${rv.flipCount}x flip)</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;">${rv.closed}</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;color:var(--grn);font-weight:700;">${rv.wins}</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;color:var(--red);font-weight:700;">${rv.losses}</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;font-weight:700;color:${parseFloat(wr2)>=50?'var(--grn)':'var(--ora)'};">${wr2}%</td>
+            <td style="padding:10px;text-align:center;font-family:monospace;font-weight:800;color:${pnl2>=0?'var(--grn)':'var(--red)'};">${(pnl2>=0?'+':'')+pnl2.toFixed(2)}%</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--dim);text-align:center;">
+        Chênh lệch PnL: <span style="font-weight:800;font-family:monospace;color:${pnl2-pnl1>=0?'var(--grn)':'var(--red)'};">
+          ${(pnl2-pnl1>=0?'+':'')+( pnl2-pnl1).toFixed(2)}%
+        </span> cho chiến lược đảo chiều
+      </div>
+    </div>`;
+    const rwr=rv.closed>0?(rv.wins/rv.closed*100).toFixed(1)+'%':'—';
+    const rwrC=rv.closed>0&&rv.wins/rv.closed>=0.5?'var(--grn)':'var(--ora)';
+    const rpnlStr=(rv.totalPnl>=0?'+':'')+rv.totalPnl.toFixed(2)+'%';
+    const rpnlC=rv.totalPnl>=0?'var(--grn)':'var(--red)';
+    const expKeyRv=activeS+'-'+activeC+'-rv';
+    const showAllRv=expanded.has(expKeyRv);
+    const tradesRv=showAllRv?rv.trades:rv.trades.slice(0,30);
+
+    html+=`
+    <div style="background:linear-gradient(135deg,rgba(124,111,255,.08),rgba(0,207,255,.05));border:1px solid var(--acc);border-radius:14px;padding:14px;margin-bottom:18px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+        <div style="width:3px;height:20px;background:linear-gradient(180deg,var(--acc),var(--cyn));border-radius:4px;"></div>
+        <div>
+          <div style="font-size:12px;font-weight:800;color:var(--acc);letter-spacing:1px;">CHIẾN LƯỢC ĐẢO CHIỀU — ${activeC}</div>
+          <div style="font-size:10px;color:var(--dim);margin-top:2px;">Bắt đầu ${sess?.dir?.toUpperCase()} · Đảo khi 5 lệnh LOSS > WIN · Số lần đảo: <span style="color:var(--cyn);font-weight:700">${rv.flipCount}</span></div>
+        </div>
+      </div>
+      <div class="stats" style="margin-bottom:12px;">
+        <div class="sc"><div class="sc-lbl">Lệnh</div><div class="sc-val">${rv.trades.length}</div></div>
+        <div class="sc"><div class="sc-lbl">Đóng</div><div class="sc-val">${rv.closed}</div></div>
+        <div class="sc"><div class="sc-lbl">Thắng</div><div class="sc-val" style="color:var(--grn)">${rv.wins}</div></div>
+        <div class="sc"><div class="sc-lbl">Thua</div><div class="sc-val" style="color:var(--red)">${rv.losses}</div></div>
+        <div class="sc"><div class="sc-lbl">Win Rate</div><div class="sc-val" style="color:${rwrC}">${rwr}</div></div>
+        <div class="sc"><div class="sc-lbl">Tổng PnL</div><div class="sc-val" style="color:${rpnlC}">${rpnlStr}</div></div>
+      </div>
+      ${rv.closed>0?`<div class="wbar-wrap" style="margin-bottom:12px;">
+        <div class="wbar-lbl">WIN / LOSS — ĐẢO CHIỀU</div>
+        <div class="wbar">
+          <div class="ws ws-w" style="width:${rv.wins/rv.closed*100}%">${rv.wins>0?'WIN '+rv.wins:''}</div>
+          <div class="ws ws-l" style="width:${rv.losses/rv.closed*100}%;color:#fff">${rv.losses>0?'LOSS '+rv.losses:''}</div>
+        </div>
+      </div>`:''}
+      <div class="tbl-wrap" style="margin-bottom:0">
+        <div class="tbl-hdr">
+          <span class="tbl-title">LỊCH SỬ ĐẢO CHIỀU</span>
+          <span class="tbl-cnt">${rv.trades.length} lệnh</span>
+        </div>
+        <div class="tbl-scroll"><table>
+          <thead><tr><th>#</th><th>Thời gian</th><th>Hướng</th><th>Giá vào</th><th>RSI</th><th>PnL</th><th>KQ</th></tr></thead>
+          <tbody>
+          ${tradesRv.map((t,i)=>{
+            const ps=t.pnl===null?'—':(t.pnl>0?'+':'')+t.pnl+'%';
+            const pc=t.pnl===null?'var(--dim)':t.pnl>0?'var(--grn)':'var(--red)';
+            const bk=t.result==='WIN'?'bw':t.result==='LOSS'?'bl':'bo';
+            const dc=t.dir==='buy'?'var(--grn)':'#ff8899';
+            return `<tr>
+              <td style="color:var(--dim)">${i+1}</td>
+              <td style="color:var(--dim)">${t.time}</td>
+              <td style="color:${dc};font-weight:700">${t.dir==='buy'?'▲ BUY':'▼ SELL'}</td>
+              <td>${t.entry}</td>
+              <td style="color:var(--acc)">${t.rsi}</td>
+              <td style="color:${pc};font-weight:700">${ps}</td>
+              <td><span class="badge ${bk}">${t.result}</span></td>
+            </tr>`;
+          }).join('')}
+          </tbody>
+        </table></div>
+        ${rv.trades.length>30?`<button class="more-btn" onclick="toggleExpand('${expKeyRv}')">
+          ${showAllRv?'▲ THU GỌN':'▼ XEM THÊM '+(rv.trades.length-30)+' GIAO DỊCH'}
+        </button>`:''}
+      </div>
+    </div>
+
+    <div class="sum-wrap">
+      <div class="sum-title">TỔNG KẾT ĐẢO CHIỀU — TẤT CẢ COIN</div>
+      <div class="tbl-scroll"><table class="summary-table">
+        <thead><tr><th>Coin</th><th>Lệnh</th><th>Đóng</th><th>WIN</th><th>LOSS</th><th>Win Rate</th><th>PnL</th><th>Đảo</th></tr></thead>
+        <tbody>
+        ${syms.map(sym=>{
+          const sd=revRes[sym];if(!sd) return '';
+          const wr2=sd.closed>0?(sd.wins/sd.closed*100).toFixed(1)+'%':'—';
+          const wrc=parseFloat(wr2)>=50?'var(--grn)':'var(--ora)';
+          const pnl2=(sd.totalPnl>=0?'+':'')+sd.totalPnl.toFixed(2)+'%';
+          const pc=sd.totalPnl>=0?'var(--grn)':'var(--red)';
+          return `<tr>
+            <td class="sym">${sym}</td><td>${sd.trades.length}</td><td>${sd.closed}</td>
+            <td style="color:var(--grn);font-weight:700">${sd.wins}</td>
+            <td style="color:var(--red);font-weight:700">${sd.losses}</td>
+            <td style="color:${wrc};font-weight:700">${wr2}</td>
+            <td style="color:${pc};font-weight:700">${pnl2}</td>
+            <td style="color:var(--cyn)">${sd.flipCount}x</td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table></div>
+    </div>`;
+  }
+
+  el.innerHTML=html;
+}
+
+function toggleExpand(key){
+  if(expanded.has(key)) expanded.delete(key); else expanded.add(key);
+  renderResults();
+}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+// ══════════════════════════════════════════════
+//  OPTIMIZER STATE
+// ══════════════════════════════════════════════
+let optState = {
+  coin: 'BTCUSDT',
+  start: '01/01/2025',
+  end: todayStr(),
+  minTrades: 50,
+  minWR: 50,
+  minPnl: 0,
+  singleMode: true,
+  sortBy: 'pnl',
+  running: false,
+  progress: 0,
+  total: 0,
+  results: [],
+  statusMsg: ''
+};
+
+const OPT_RSI         = [35, 40, 45, 50, 55, 60, 65];
+const OPT_TP          = [1, 1.5, 2, 2.5, 3, 4, 5];
+const OPT_SL          = [0.5, 1, 1.5, 2, 2.5, 3];
+const OPT_DIRS        = ['buy','sell'];
+const OPT_RSI_PERIODS = [7, 10, 14, 21];
+const OPT_MACD_MODES  = ['none','macd'];
+
+// ── MACD helpers ──────────────────────────────
+function calcEMA(values, period){
+  const k=2/(period+1);
+  const ema=new Array(values.length).fill(null);
+  ema[0]=values[0];
+  for(let i=1;i<values.length;i++) ema[i]=values[i]*k+ema[i-1]*(1-k);
+  return ema;
+}
+function buildMacdMap(candles1D){
+  const closes=candles1D.map(c=>parseFloat(c[4]));
+  const times =candles1D.map(c=>c[0]);
+  const ema12=calcEMA(closes,12);
+  const ema26=calcEMA(closes,26);
+  const diff =closes.map((_,i)=>ema12[i]-ema26[i]);
+  const dea  =calcEMA(diff,9);
+  const hist =diff.map((d,i)=>d-dea[i]);
+  const map=new Map();
+  for(let i=0;i<times.length;i++){
+    const dayKey=Math.floor((times[i]+7*3600000)/86400000);
+    map.set(dayKey, hist[i]);
+  }
+  return map;
+}
+function getMacdHist(macdMap, tsMs){
+  const dayKey=Math.floor((tsMs+7*3600000)/86400000);
+  return macdMap.get(dayKey)??null;
+}
+
+// ── backtestWithMacd: giống backtest nhưng filter MACD 1D ──
+function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, singleMode, rsiPeriod, macdMap){
+  const closes=candles.map(c=>parseFloat(c[4]));
+  const highs =candles.map(c=>parseFloat(c[2]));
+  const lows  =candles.map(c=>parseFloat(c[3]));
+  const times =candles.map(c=>c[0]);
+  const rsi   =calcRSI(closes, rsiPeriod||14);
+  const trades=[];
+  let lastCloseBar=-1;
+
+  for(let i=16;i<candles.length-1;i++){
+    if(!rsi[i-1]||!rsi[i]) continue;
+    if(times[i]<startTs||times[i]>endTs) continue;
+    if(singleMode && i<=lastCloseBar) continue;
+
+    const sig = dir==='buy'
+      ? (rsi[i-1]<rsiLevel && rsi[i]>rsiLevel)
+      : (rsi[i-1]>rsiLevel && rsi[i]<rsiLevel);
+    if(!sig) continue;
+
+    // MACD 1D filter
+    const hist=getMacdHist(macdMap, times[i]);
+    if(hist===null) continue; // không có data 1D → bỏ qua
+    if(dir==='buy'  && hist<=0) continue; // histogram âm → không buy
+    if(dir==='sell' && hist>=0) continue; // histogram dương → không sell
+
+    const entry=closes[i];
+    const tp=dir==='buy'?entry*(1+tpPct/100):entry*(1-tpPct/100);
+    const sl=dir==='buy'?entry*(1-slPct/100):entry*(1+slPct/100);
+    let result='OPEN',pnl=null,exitBar=-1;
+
+    for(let j=i+1;j<candles.length;j++){
+      if(dir==='buy'){
+        if(highs[j]>=tp){result='WIN';pnl=tpPct;exitBar=j;break;}
+        if(lows[j]<=sl){result='LOSS';pnl=-slPct;exitBar=j;break;}
+      } else {
+        if(lows[j]<=tp){result='WIN';pnl=tpPct;exitBar=j;break;}
+        if(highs[j]>=sl){result='LOSS';pnl=-slPct;exitBar=j;break;}
+      }
+    }
+    if(singleMode) lastCloseBar=exitBar>0?exitBar:candles.length;
+    const d=new Date(times[i]);
+    trades.push({
+      time:pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes()),
+      entry:entry>100?entry.toFixed(2):entry.toFixed(4),
+      rsi:rsi[i].toFixed(2), result, pnl
+    });
+  }
+  return trades;
+}
+
+async function runOptimizer(){
+  if(optState.running) return;
+  const startTs = parseDate(optState.start, false);
+  const endTs   = parseDate(optState.end, true);
+  if(!startTs||!endTs){ alert('Ngày không hợp lệ'); return; }
+
+  optState.running=true; optState.results=[]; optState.progress=0;
+  const combos = OPT_RSI_PERIODS.length * OPT_RSI.length * OPT_TP.length * OPT_SL.length * OPT_DIRS.length * OPT_MACD_MODES.length;
+  optState.total = combos;
+  optState.statusMsg = `Đang tải nến 1H ${optState.coin}...`;
+  renderOptimizer();
+
+  let candles1H, candles1D, macdMap;
+  try {
+    candles1H = await fetchKlines(optState.coin, startTs, endTs);
+    optState.statusMsg = `Đang tải nến 1D ${optState.coin}...`;
+    renderOptimizer();
+    // Fetch 1D — lấy rộng hơn 60 ngày để MACD warm up đủ
+    const startD = startTs - 60*86400000;
+    const url1D = `https://api.binance.com/api/v3/klines?symbol=${optState.coin}&interval=1d&startTime=${startD}&endTime=${endTs}&limit=1000`;
+    const r1D = await fetch(url1D);
+    if(!r1D.ok) throw new Error('Lỗi fetch 1D: '+r1D.status);
+    candles1D = await r1D.json();
+    macdMap = buildMacdMap(candles1D);
+  } catch(e) {
+    optState.statusMsg = '❌ Lỗi: ' + e.message;
+    optState.running = false;
+    renderOptimizer(); return;
+  }
+
+  optState.statusMsg = `Đang thử ${combos} tổ hợp...`;
+  renderOptimizer();
+
+  const res = [];
+  let done = 0;
+
+  for(const macdMode of OPT_MACD_MODES){
+    for(const period of OPT_RSI_PERIODS){
+      for(const dir of OPT_DIRS){
+        for(const rsi of OPT_RSI){
+          for(const tp of OPT_TP){
+            for(const sl of OPT_SL){
+              let trades;
+              if(macdMode==='none'){
+                // Không dùng MACD — gọi backtest gốc với rsiPeriod
+                trades = backtest(candles1H, dir, startTs, endTs, rsi, tp, sl, optState.singleMode, period);
+              } else {
+                // Dùng MACD 1D filter
+                trades = backtestWithMacd(candles1H, dir, startTs, endTs, rsi, tp, sl, optState.singleMode, period, macdMap);
+              }
+              const sum = summarize(trades);
+              const wr  = sum.closed>0 ? sum.wins/sum.closed*100 : 0;
+              if(sum.closed>=optState.minTrades && wr>=optState.minWR && sum.totalPnl>=optState.minPnl){
+                res.push({ macdMode, period, dir, rsi, tp, sl,
+                  trades:sum.closed, wins:sum.wins, losses:sum.losses,
+                  wr:parseFloat(wr.toFixed(1)), pnl:parseFloat(sum.totalPnl.toFixed(2)) });
+              }
+              done++;
+              if(done % 100 === 0){
+                optState.progress=done;
+                renderOptimizerProgress();
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  res.sort((a,b)=>b[optState.sortBy==='wr'?'wr':optState.sortBy==='trades'?'trades':'pnl']
+                 -a[optState.sortBy==='wr'?'wr':optState.sortBy==='trades'?'trades':'pnl']);
+
+  optState.results  = res;
+  optState.progress = combos;
+  optState.running  = false;
+  optState.statusMsg = `✅ Xong! ${combos} tổ hợp → tìm được ${res.length} thỏa điều kiện`;
+  renderOptimizer();
+}
+
+function setOptSort(by){
+  optState.sortBy = by;
+  const res = optState.results;
+  res.sort((a,b)=> b[by==='wr'?'wr':by==='trades'?'trades':'pnl']
+                 - a[by==='wr'?'wr':by==='trades'?'trades':'pnl']);
+  optState.results = res;
+  renderOptimizer();
+}
+
+function renderOptimizerProgress(){
+  const bar = document.getElementById('optBar');
+  const pct = document.getElementById('optPct');
+  if(bar) bar.style.width = (optState.progress/optState.total*100)+'%';
+  if(pct) pct.textContent = Math.round(optState.progress/optState.total*100)+'%';
+}
+
+function renderOptimizer(){
+  const el = document.getElementById('optimizerSection');
+  if(!el) return;
+  const o = optState;
+
+  let html = `<div class="opt-card">
+    <div class="opt-title">🔍 AUTO OPTIMIZER</div>
+    <div class="opt-sub">Thử tự động ${OPT_RSI_PERIODS.length} RSI Period × ${OPT_RSI.length} RSI Level × ${OPT_TP.length} TP × ${OPT_SL.length} SL × 2 chiều × 2 MACD = ${OPT_RSI_PERIODS.length*OPT_RSI.length*OPT_TP.length*OPT_SL.length*2*2} tổ hợp</div>
+
+    <div class="opt-grid">
+      <div><div class="flbl">Coin</div>
+        <input type="text" value="${esc(o.coin)}"
+          oninput="optState.coin=this.value.trim().toUpperCase()"
+          style="font-family:monospace">
+      </div>
+      <div><div class="flbl">Số lệnh tối thiểu</div>
+        <input type="number" min="10" max="9999" value="${o.minTrades}"
+          oninput="optState.minTrades=parseInt(this.value)||50">
+      </div>
+      <div><div class="flbl">Từ ngày</div>
+        <input type="text" value="${esc(o.start)}"
+          oninput="optState.start=this.value">
+      </div>
+      <div><div class="flbl">Đến ngày</div>
+        <input type="text" value="${esc(o.end)}"
+          oninput="optState.end=this.value">
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:8px;flex:1;">
+        <div style="font-size:11px;color:var(--dim);">Win Rate mục tiêu ≥</div>
+        <input type="number" min="1" max="100" value="${o.minWR}"
+          oninput="optState.minWR=parseFloat(this.value)||50"
+          style="width:64px;text-align:center;background:var(--bg2);border:2px solid var(--acc);
+                 border-radius:8px;color:var(--acc);padding:7px 4px;font-size:18px;font-weight:800;
+                 outline:none;font-family:'JetBrains Mono',monospace;">
+        <div style="font-size:18px;font-weight:800;color:var(--acc);">%</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex:1;">
+        <div style="font-size:11px;color:var(--dim);">PnL tối thiểu ≥</div>
+        <input type="number" min="-999" max="99999" step="10" value="${o.minPnl}"
+          oninput="optState.minPnl=parseFloat(this.value)||0"
+          style="width:80px;text-align:center;background:var(--bg2);border:2px solid var(--grn);
+                 border-radius:8px;color:var(--grn);padding:7px 4px;font-size:18px;font-weight:800;
+                 outline:none;font-family:'JetBrains Mono',monospace;">
+        <div style="font-size:18px;font-weight:800;color:var(--grn);">%</div>
+      </div>
+    </div>
+    <div class="toggle-row ${o.singleMode?'on':''}"
+      style="margin-bottom:14px;"
+      onclick="optState.singleMode=!optState.singleMode;renderOptimizer()">
+      <div class="toggle-info">
+        <div style="font-size:12px;font-weight:700;color:var(--txt);">1 lệnh / thời điểm</div>
+        <div style="font-size:11px;color:var(--dim);margin-top:2px;">${o.singleMode?'✅ Sát thực tế nhất':'⚠️ Cho phép lệnh chồng nhau'}</div>
+      </div>
+      <div class="toggle-sw ${o.singleMode?'on':''}"></div>
+    </div>
+
+    ${o.running ? `
+    <div style="margin-bottom:8px;font-size:11px;color:var(--acc);display:flex;justify-content:space-between;">
+      <span>${o.statusMsg}</span><span id="optPct">0%</span>
+    </div>
+    <div class="opt-progress"><div class="opt-bar" id="optBar" style="width:0%"></div></div>
+    ` : `
+    ${o.statusMsg?`<div style="font-size:11px;color:${o.statusMsg.includes('❌')?'var(--red)':'var(--grn)'};margin-bottom:10px;">${o.statusMsg}</div>`:''}
+    <button class="opt-run" onclick="runOptimizer()">🔍 TÌM THAM SỐ TỐI ƯU</button>
+    `}
+
+    ${o.results.length>0 ? `
+    <div class="opt-result-wrap">
+      <div class="opt-result-hdr">
+        <span style="font-size:11px;color:var(--acc);font-weight:700;letter-spacing:1px;">
+          TOP KẾT QUẢ — ${esc(o.coin)} · ${o.results.length} tổ hợp thỏa điều kiện
+        </span>
+        <div style="display:flex;gap:6px;">
+          <span style="font-size:10px;color:var(--dim);align-self:center;">Sắp xếp:</span>
+          <button class="sort-btn ${o.sortBy==='pnl'?'on':''}" onclick="setOptSort('pnl')">PnL</button>
+          <button class="sort-btn ${o.sortBy==='wr'?'on':''}"  onclick="setOptSort('wr')">WinRate</button>
+          <button class="sort-btn ${o.sortBy==='trades'?'on':''}" onclick="setOptSort('trades')">Lệnh</button>
+        </div>
+      </div>
+      <div class="tbl-scroll">
+      <table>
+        <thead><tr>
+          <th>#</th><th>MACD 1D</th><th>RSI Period</th><th>Hướng</th>
+          <th>RSI Lv</th><th>TP%</th><th>SL%</th><th>R:R</th>
+          <th>Lệnh</th><th>WIN</th><th>LOSS</th><th>WinRate</th><th>PnL</th>
+        </tr></thead>
+        <tbody>
+        ${o.results.slice(0,50).map((r,i)=>{
+          const rr=(r.tp/r.sl).toFixed(1);
+          const wrc=r.wr>=55?'var(--grn)':r.wr>=50?'var(--ora)':'var(--red)';
+          const pc=r.pnl>=0?'var(--grn)':'var(--red)';
+          const dc=r.dir==='buy'?'var(--grn)':'#ff8899';
+          const macdLabel=r.macdMode==='macd'
+            ?'<span style="color:var(--cyn);font-weight:700">✅ ON</span>'
+            :'<span style="color:var(--dim)">—</span>';
+          return `<tr>
+            <td style="color:var(--dim)">${i+1}</td>
+            <td>${macdLabel}</td>
+            <td style="color:var(--acc);font-weight:700">${r.period}</td>
+            <td style="color:${dc};font-weight:700">${r.dir==='buy'?'▲ BUY':'▼ SELL'}</td>
+            <td style="color:var(--acc)">${r.rsi}</td>
+            <td style="color:var(--grn)">+${r.tp}%</td>
+            <td style="color:var(--red)">-${r.sl}%</td>
+            <td style="color:var(--dim)">${rr}</td>
+            <td>${r.trades}</td>
+            <td style="color:var(--grn);font-weight:700">${r.wins}</td>
+            <td style="color:var(--red);font-weight:700">${r.losses}</td>
+            <td style="color:${wrc};font-weight:800">${r.wr}%</td>
+            <td style="color:${pc};font-weight:800">${r.pnl>=0?'+':''}${r.pnl}%</td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table>
+      </div>
+      ${o.results.length>50?`<div style="padding:10px;text-align:center;font-size:11px;color:var(--dim);">Hiển thị 50/${o.results.length} kết quả tốt nhất</div>`:''}
+    </div>
+    ` : (!o.running && o.statusMsg.includes('✅') ? `
+    <div style="margin-top:12px;text-align:center;padding:20px;color:var(--dim);font-size:13px;">
+      ⚠ Không tìm thấy tổ hợp nào thỏa điều kiện.<br>
+      <span style="font-size:11px;">Thử giảm Win Rate mục tiêu hoặc số lệnh tối thiểu.</span>
+    </div>` : '')}
+  </div>`;
+
+  el.innerHTML = html;
+}
+
+// ══════════════════════════════════════════════
+// init
+render();
+renderOptimizer();
+</script>
+</body>
+</html>
