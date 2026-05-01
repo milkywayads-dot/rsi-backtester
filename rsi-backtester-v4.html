@@ -686,6 +686,7 @@ function renderConfig(){
           {val:0, label:'MULTI', desc:'Không giới hạn', c:'var(--ora)'},
           {val:1, label:'1 LỆNH', desc:'Sát thực tế nhất', c:'var(--grn)'},
           {val:3, label:'3 LỆNH', desc:'Tối đa 3 song song', c:'var(--cyn)'},
+          {val:5, label:'5 LỆNH', desc:'Tối đa 5 song song', c:'#a78bfa'},
         ].map(opt=>`
           <button onclick="setField(${s.id},'maxOrders',${opt.val})" style="
             flex:1;padding:10px 6px;border-radius:9px;cursor:pointer;
@@ -1021,6 +1022,7 @@ let optState = {
   minWR: 50,
   minPnl: 0,
   singleMode: true,
+  maxOrders: 1,
   sortBy: 'pnl',
   running: false,
   progress: 0,
@@ -1161,10 +1163,10 @@ async function runOptimizer(){
               let trades;
               if(macdMode==='none'){
                 // Không dùng MACD — gọi backtest gốc với rsiPeriod
-                trades = backtest(candles1H, dir, startTs, endTs, rsi, tp, sl, optState.singleMode, period);
+                trades = backtest(candles1H, dir, startTs, endTs, rsi, tp, sl, optState.maxOrders, period);
               } else {
                 // Dùng MACD 1D filter
-                trades = backtestWithMacd(candles1H, dir, startTs, endTs, rsi, tp, sl, optState.singleMode, period, macdMap);
+                trades = backtestWithMacd(candles1H, dir, startTs, endTs, rsi, tp, sl, optState.maxOrders, period, macdMap);
               }
               const sum = summarize(trades);
               const wr  = sum.closed>0 ? sum.wins/sum.closed*100 : 0;
@@ -1260,14 +1262,25 @@ function renderOptimizer(){
         <div style="font-size:18px;font-weight:800;color:var(--grn);">%</div>
       </div>
     </div>
-    <div class="toggle-row ${o.singleMode?'on':''}"
-      style="margin-bottom:14px;"
-      onclick="optState.singleMode=!optState.singleMode;renderOptimizer()">
-      <div class="toggle-info">
-        <div style="font-size:12px;font-weight:700;color:var(--txt);">1 lệnh / thời điểm</div>
-        <div style="font-size:11px;color:var(--dim);margin-top:2px;">${o.singleMode?'✅ Sát thực tế nhất':'⚠️ Cho phép lệnh chồng nhau'}</div>
+    <div style="margin-bottom:14px;">
+      <div style="font-size:10px;color:var(--acc);font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">Số lệnh tối đa cùng lúc</div>
+      <div style="display:flex;gap:7px;">
+        ${[
+          {val:0, label:'MULTI',   desc:'Không giới hạn', c:'var(--ora)'},
+          {val:1, label:'1 LỆNH', desc:'Sát thực tế',     c:'var(--grn)'},
+          {val:3, label:'3 LỆNH', desc:'Tối đa 3',        c:'var(--cyn)'},
+          {val:5, label:'5 LỆNH', desc:'Tối đa 5',        c:'#a78bfa'},
+        ].map(opt=>`
+          <button onclick="optState.maxOrders=${opt.val};renderOptimizer()" style="
+            flex:1;padding:8px 4px;border-radius:8px;cursor:pointer;
+            font:700 11px/1 'Outfit',sans-serif;transition:all .15s;
+            background:${o.maxOrders===opt.val?'rgba(124,111,255,.15)':'var(--bg2)'};
+            border:1.5px solid ${o.maxOrders===opt.val?opt.c:'var(--b2)'};
+            color:${o.maxOrders===opt.val?opt.c:'var(--dim)'};">
+            ${opt.label}<br>
+            <span style="font-size:9px;font-weight:400;opacity:.7">${opt.desc}</span>
+          </button>`).join('')}
       </div>
-      <div class="toggle-sw ${o.singleMode?'on':''}"></div>
     </div>
 
     ${o.running ? `
