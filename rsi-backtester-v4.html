@@ -1024,6 +1024,8 @@ let optState = {
   singleMode: true,
   maxOrders: 1,
   sortBy: 'pnl',
+  filterPeriod: null,
+  filterDir: null,
   running: false,
   progress: 0,
   total: 0,
@@ -1125,6 +1127,7 @@ async function runOptimizer(){
   if(!startTs||!endTs){ alert('Ngày không hợp lệ'); return; }
 
   optState.running=true; optState.results=[]; optState.progress=0;
+  optState.filterPeriod=null; optState.filterDir=null;
   const combos = OPT_RSI_PERIODS.length * OPT_RSI.length * OPT_TP.length * OPT_SL.length * OPT_DIRS.length * OPT_MACD_MODES.length;
   optState.total = combos;
   optState.statusMsg = `Đang tải nến 1H ${optState.coin}...`;
@@ -1299,13 +1302,39 @@ function renderOptimizer(){
         <span style="font-size:11px;color:var(--acc);font-weight:700;letter-spacing:1px;">
           TOP KẾT QUẢ — ${esc(o.coin)} · ${o.results.length} tổ hợp thỏa điều kiện
         </span>
-        <div style="display:flex;gap:6px;">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <span style="font-size:10px;color:var(--dim);align-self:center;">Sắp xếp:</span>
           <button class="sort-btn ${o.sortBy==='pnl'?'on':''}" onclick="setOptSort('pnl')">PnL</button>
           <button class="sort-btn ${o.sortBy==='wr'?'on':''}"  onclick="setOptSort('wr')">WinRate</button>
           <button class="sort-btn ${o.sortBy==='trades'?'on':''}" onclick="setOptSort('trades')">Lệnh</button>
         </div>
       </div>
+
+      <!-- Filter bar -->
+      <div style="padding:10px 14px;border-bottom:1px solid var(--b1);display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+        <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">
+          <span style="font-size:10px;color:var(--dim);letter-spacing:1px;">RSI PERIOD:</span>
+          <button class="sort-btn ${o.filterPeriod===null?'on':''}" onclick="optState.filterPeriod=null;renderOptimizer()">Tất cả</button>
+          ${OPT_RSI_PERIODS.map(p=>`
+            <button class="sort-btn ${o.filterPeriod===p?'on':''}" onclick="optState.filterPeriod=${p};renderOptimizer()">${p}</button>
+          `).join('')}
+        </div>
+        <div style="display:flex;gap:5px;align-items:center;">
+          <span style="font-size:10px;color:var(--dim);letter-spacing:1px;">HƯỚNG:</span>
+          <button class="sort-btn ${o.filterDir===null?'on':''}" onclick="optState.filterDir=null;renderOptimizer()">Tất cả</button>
+          <button class="sort-btn ${o.filterDir==='buy'?'on':''}"  onclick="optState.filterDir='buy';renderOptimizer()" style="${o.filterDir==='buy'?'color:var(--grn);border-color:var(--grn)':''}">▲ BUY</button>
+          <button class="sort-btn ${o.filterDir==='sell'?'on':''}" onclick="optState.filterDir='sell';renderOptimizer()" style="${o.filterDir==='sell'?'color:#ff8899;border-color:#ff8899':''}">▼ SELL</button>
+        </div>
+        <span style="font-size:10px;color:var(--dim);margin-left:auto;">
+          ${(()=>{
+            let f=o.results;
+            if(o.filterPeriod!==null) f=f.filter(r=>r.period===o.filterPeriod);
+            if(o.filterDir!==null) f=f.filter(r=>r.dir===o.filterDir);
+            return f.length+' kết quả';
+          })()}
+        </span>
+      </div>
+
       <div class="tbl-scroll">
       <table>
         <thead><tr>
@@ -1314,7 +1343,11 @@ function renderOptimizer(){
           <th>Lệnh</th><th>WIN</th><th>LOSS</th><th>WinRate</th><th>PnL</th>
         </tr></thead>
         <tbody>
-        ${o.results.slice(0,50).map((r,i)=>{
+        ${(()=>{
+          let filtered=o.results;
+          if(o.filterPeriod!==null) filtered=filtered.filter(r=>r.period===o.filterPeriod);
+          if(o.filterDir!==null) filtered=filtered.filter(r=>r.dir===o.filterDir);
+          return filtered.slice(0,50).map((r,i)=>{
           const rr=(r.tp/r.sl).toFixed(1);
           const wrc=r.wr>=55?'var(--grn)':r.wr>=50?'var(--ora)':'var(--red)';
           const pc=r.pnl>=0?'var(--grn)':'var(--red)';
@@ -1337,11 +1370,17 @@ function renderOptimizer(){
             <td style="color:${wrc};font-weight:800">${r.wr}%</td>
             <td style="color:${pc};font-weight:800">${r.pnl>=0?'+':''}${r.pnl}%</td>
           </tr>`;
-        }).join('')}
+          }).join('');
+        })()}
         </tbody>
       </table>
       </div>
-      ${o.results.length>50?`<div style="padding:10px;text-align:center;font-size:11px;color:var(--dim);">Hiển thị 50/${o.results.length} kết quả tốt nhất</div>`:''}
+      ${(()=>{
+        let f=o.results;
+        if(o.filterPeriod!==null) f=f.filter(r=>r.period===o.filterPeriod);
+        if(o.filterDir!==null) f=f.filter(r=>r.dir===o.filterDir);
+        return f.length>50?`<div style="padding:10px;text-align:center;font-size:11px;color:var(--dim);">Hiển thị 50/${f.length} kết quả</div>`:'';
+      })()}
     </div>
     ` : (!o.running && o.statusMsg.includes('✅') ? `
     <div style="margin-top:12px;text-align:center;padding:20px;color:var(--dim);font-size:13px;">
