@@ -1024,9 +1024,11 @@ let optState = {
   singleMode: true,
   maxOrders: 1,
   macdModes: ['1d'],
+  alignModes: ['trend','counter'],
   sortBy: 'pnl',
   filterPeriod: null,
   filterDir: null,
+  filterAlign: null,
   running: false,
   progress: 0,
   total: 0,
@@ -1075,7 +1077,7 @@ function getMacdHist(macdMap, tsMs){
 }
 
 // ── backtestWithMacd: giống backtest nhưng filter MACD 1D ──
-function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, maxOrders, rsiPeriod, macdMap){
+function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, maxOrders, rsiPeriod, macdMap, align='trend'){
   const closes=candles.map(c=>parseFloat(c[4]));
   const highs =candles.map(c=>parseFloat(c[2]));
   const lows  =candles.map(c=>parseFloat(c[3]));
@@ -1095,11 +1097,16 @@ function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, 
       : (rsi[i-1]>rsiLevel && rsi[i]<rsiLevel);
     if(!sig) continue;
 
-    // MACD 1D filter
+    // MACD filter — trend: thuận chiều, counter: ngược chiều
     const hist=getMacdHist(macdMap, times[i]);
-    if(hist===null) continue; // không có data 1D → bỏ qua
-    if(dir==='buy'  && hist<=0) continue; // histogram âm → không buy
-    if(dir==='sell' && hist>=0) continue; // histogram dương → không sell
+    if(hist===null) continue;
+    if(align==='trend'){
+      if(dir==='buy'  && hist<=0) continue; // trend: buy khi dương
+      if(dir==='sell' && hist>=0) continue; // trend: sell khi âm
+    } else {
+      if(dir==='buy'  && hist>=0) continue; // counter: buy khi âm
+      if(dir==='sell' && hist<=0) continue; // counter: sell khi dương
+    }
 
     const entry=closes[i];
     const tp=dir==='buy'?entry*(1+tpPct/100):entry*(1-tpPct/100);
@@ -1126,6 +1133,13 @@ function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, 
   return trades;
 }
 
+function toggleAlignMode(m){
+  const idx=optState.alignModes.indexOf(m);
+  if(idx>=0) optState.alignModes=optState.alignModes.filter(x=>x!==m);
+  else optState.alignModes=[...optState.alignModes,m];
+  renderOptimizer();
+}
+
 function toggleMacdMode(tf){
   const idx=optState.macdModes.indexOf(tf);
   if(idx>=0) optState.macdModes=optState.macdModes.filter(m=>m!==tf);
@@ -1140,7 +1154,7 @@ async function runOptimizer(){
   if(!startTs||!endTs){ alert('Ngày không hợp lệ'); return; }
 
   optState.running=true; optState.results=[]; optState.progress=0;
-  optState.filterPeriod=null; optState.filterDir=null;
+  optState.filterPeriod=null; optState.filterDir=null; optState.filterAlign=null;
 
   // Xây dựng danh sách modes cần chạy từ checkbox
   const selectedTfs = optState.macdModes; // vd: ['1d','3d']
@@ -1189,8 +1203,12 @@ async function runOptimizer(){
   // Build danh sách modes để loop
   // mode object: { key: 'none'|'1d'|'2d'|'3d', label: 'none'|'macd', tf: null|'1d'|'2d'|'3d' }
   const modes = [];
-  if(hasNone) modes.push({ key:'none', label:'none', tf:null });
-  for(const tf of tfMacd) modes.push({ key:tf, label:'macd', tf });
+  if(hasNone) modes.push({ key:'none', label:'none', tf:null, align:'trend' });
+  for(const tf of tfMacd){
+    for(const align of (optState.alignModes||['trend'])){
+      modes.push({ key:tf+'_'+align, label:'macd', tf, align });
+    }
+  }
 
   for(const mode of modes){
     for(const period of OPT_RSI_PERIODS){
@@ -1202,12 +1220,12 @@ async function runOptimizer(){
               if(mode.label==='none'){
                 trades = backtest(candles1H, dir, startTs, endTs, rsi, tp, sl, optState.maxOrders, period);
               } else {
-                trades = backtestWithMacd(candles1H, dir, startTs, endTs, rsi, tp, sl, optState.maxOrders, period, macdMapByTf[mode.tf]);
+                trades = backtestWithMacd(candles1H, dir, startTs, endTs, rsi, tp, sl, optState.maxOrders, period, macdMapByTf[mode.tf], mode.align);
               }
               const sum = summarize(trades);
               const wr  = sum.closed>0 ? sum.wins/sum.closed*100 : 0;
               if(sum.closed>=optState.minTrades && wr>=optState.minWR && sum.totalPnl>=optState.minPnl){
-                res.push({ macdMode: mode.key, period, dir, rsi, tp, sl,
+                res.push({ macdMode: mode.key, macdTf: mode.tf||'none', align: mode.align, period, dir, rsi, tp, sl,
                   trades:sum.closed, wins:sum.wins, losses:sum.losses,
                   wr:parseFloat(wr.toFixed(1)), pnl:parseFloat(sum.totalPnl.toFixed(2)) });
               }
@@ -1346,10 +1364,32 @@ function renderOptimizer(){
             const sel=o.macdModes||['1d'];
             const hasN=sel.includes('none');
             const tfN=sel.filter(t=>t!=='none').length;
-            const modes=(hasN?1:0)+tfN;
+            const alN=(o.alignModes||['trend']).length;
+            const modes=(hasN?1:0)+tfN*alN;
             return (OPT_RSI_PERIODS.length*OPT_RSI.length*OPT_TP.length*OPT_SL.length*OPT_DIRS.length*modes).toLocaleString();
           })()
         }</span>
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px;">
+      <div style="font-size:10px;color:var(--acc);font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">CHIỀU MACD (thuận / ngược xu hướng)</div>
+      <div style="display:flex;gap:7px;">
+        ${[
+          {val:'trend',   label:'Thuận chiều', desc:'Hist dương→BUY / âm→SELL', c:'var(--grn)'},
+          {val:'counter', label:'Ngược chiều', desc:'Hist âm→BUY / dương→SELL', c:'var(--ora)'},
+        ].map(opt=>{
+          const on=(o.alignModes||['trend']).includes(opt.val);
+          return `<button onclick="toggleAlignMode('${opt.val}')" style="
+            flex:1;padding:8px 6px;border-radius:8px;cursor:pointer;
+            font:700 12px/1 'Outfit',sans-serif;transition:all .15s;
+            background:${on?'rgba(124,111,255,.15)':'var(--bg2)'};
+            border:1.5px solid ${on?opt.c:'var(--b2)'};
+            color:${on?opt.c:'var(--dim)'};">
+            ${on?'☑':'☐'} ${opt.label}<br>
+            <span style="font-size:9px;font-weight:400;opacity:.7">${opt.desc}</span>
+          </button>`;
+        }).join('')}
       </div>
     </div>
 
@@ -1392,11 +1432,18 @@ function renderOptimizer(){
           <button class="sort-btn ${o.filterDir==='buy'?'on':''}"  onclick="optState.filterDir='buy';renderOptimizer()" style="${o.filterDir==='buy'?'color:var(--grn);border-color:var(--grn)':''}">▲ BUY</button>
           <button class="sort-btn ${o.filterDir==='sell'?'on':''}" onclick="optState.filterDir='sell';renderOptimizer()" style="${o.filterDir==='sell'?'color:#ff8899;border-color:#ff8899':''}">▼ SELL</button>
         </div>
+        <div style="display:flex;gap:5px;align-items:center;">
+          <span style="font-size:10px;color:var(--dim);letter-spacing:1px;">CHIỀU:</span>
+          <button class="sort-btn ${o.filterAlign===null?'on':''}" onclick="optState.filterAlign=null;renderOptimizer()">Tất cả</button>
+          <button class="sort-btn ${o.filterAlign==='trend'?'on':''}"   onclick="optState.filterAlign='trend';renderOptimizer()"   style="${o.filterAlign==='trend'?'color:var(--grn);border-color:var(--grn)':''}">Thuận</button>
+          <button class="sort-btn ${o.filterAlign==='counter'?'on':''}" onclick="optState.filterAlign='counter';renderOptimizer()" style="${o.filterAlign==='counter'?'color:var(--ora);border-color:var(--ora)':''}">Ngược</button>
+        </div>
         <span style="font-size:10px;color:var(--dim);margin-left:auto;">
           ${(()=>{
             let f=o.results;
             if(o.filterPeriod!==null) f=f.filter(r=>r.period===o.filterPeriod);
             if(o.filterDir!==null) f=f.filter(r=>r.dir===o.filterDir);
+            if(o.filterAlign!==null) f=f.filter(r=>r.align===o.filterAlign);
             return f.length+' kết quả';
           })()}
         </span>
@@ -1414,14 +1461,21 @@ function renderOptimizer(){
           let filtered=o.results;
           if(o.filterPeriod!==null) filtered=filtered.filter(r=>r.period===o.filterPeriod);
           if(o.filterDir!==null) filtered=filtered.filter(r=>r.dir===o.filterDir);
+          if(o.filterAlign!==null) filtered=filtered.filter(r=>r.align===o.filterAlign);
           return filtered.slice(0,50).map((r,i)=>{
           const rr=(r.tp/r.sl).toFixed(1);
           const wrc=r.wr>=55?'var(--grn)':r.wr>=50?'var(--ora)':'var(--red)';
           const pc=r.pnl>=0?'var(--grn)':'var(--red)';
           const dc=r.dir==='buy'?'var(--grn)':'#ff8899';
-          const macdLabel=r.macdMode==='none'
-            ?'<span style="color:var(--dim)">—</span>'
-            :`<span style="color:var(--cyn);font-weight:700">${r.macdMode.toUpperCase()}</span>`;
+          const macdLabel=(()=>{
+            if(r.macdTf==='none') return '<span style="color:var(--dim)">—</span>';
+            const tf=r.macdTf.toUpperCase();
+            const arrow=r.align==='trend'
+              ? (r.dir==='buy'?'▲':'▼')   // trend: buy=dương▲, sell=âm▼
+              : (r.dir==='buy'?'▼':'▲');   // counter: buy=âm▼, sell=dương▲
+            const c=r.align==='trend'?'var(--cyn)':'var(--ora)';
+            return `<span style="color:${c};font-weight:700">${tf} ${arrow}</span>`;
+          })();
           return `<tr>
             <td style="color:var(--dim)">${i+1}</td>
             <td>${macdLabel}</td>
@@ -1446,6 +1500,7 @@ function renderOptimizer(){
         let f=o.results;
         if(o.filterPeriod!==null) f=f.filter(r=>r.period===o.filterPeriod);
         if(o.filterDir!==null) f=f.filter(r=>r.dir===o.filterDir);
+        if(o.filterAlign!==null) f=f.filter(r=>r.align===o.filterAlign);
         return f.length>50?`<div style="padding:10px;text-align:center;font-size:11px;color:var(--dim);">Hiển thị 50/${f.length} kết quả</div>`:'';
       })()}
     </div>
