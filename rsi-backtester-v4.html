@@ -1318,10 +1318,10 @@ function renderOptimizer(){
       <div style="font-size:10px;color:var(--acc);font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">MACD FILTER (chọn 1 hoặc nhiều)</div>
       <div style="display:flex;gap:7px;flex-wrap:wrap;">
         ${[
-          {val:'none', label:'Không MACD', desc:'RSI thuần', c:'var(--dim)'},
-          {val:'1d',   label:'MACD 1D',   desc:'Nến 1 ngày', c:'var(--cyn)'},
-          {val:'2d',   label:'MACD 2D',   desc:'Nến 2 ngày', c:'var(--acc)'},
-          {val:'3d',   label:'MACD 3D',   desc:'Nến 3 ngày', c:'#a78bfa'},
+          {val:'none', label:'Không MACD', desc:'RSI thuần',   c:'var(--dim)'},
+          {val:'1d',   label:'MACD 1D',   desc:'Nến 1 ngày',  c:'var(--cyn)'},
+          {val:'1w',   label:'MACD 1W',   desc:'Nến 1 tuần',  c:'var(--acc)'},
+          {val:'3d',   label:'MACD 3D',   desc:'Nến 3 ngày',  c:'#a78bfa'},
         ].map(opt=>{
           const on=o.macdModes&&o.macdModes.includes(opt.val);
           return `<button onclick="toggleMacdMode('${opt.val}')" style="
