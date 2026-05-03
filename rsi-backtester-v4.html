@@ -1049,18 +1049,23 @@ function calcEMA(values, period){
   for(let i=1;i<values.length;i++) ema[i]=values[i]*k+ema[i-1]*(1-k);
   return ema;
 }
-function buildMacdMap(candles1D){
-  const closes=candles1D.map(c=>parseFloat(c[4]));
-  const times =candles1D.map(c=>c[0]);
+function buildMacdMap(candles){
+  const closes=candles.map(c=>parseFloat(c[4]));
+  const opens =candles.map(c=>c[0]);   // openTime
+  const closesTs=candles.map(c=>c[6]); // closeTime
   const ema12=calcEMA(closes,12);
   const ema26=calcEMA(closes,26);
   const diff =closes.map((_,i)=>ema12[i]-ema26[i]);
   const dea  =calcEMA(diff,9);
   const hist =diff.map((d,i)=>d-dea[i]);
   const map=new Map();
-  for(let i=0;i<times.length;i++){
-    const dayKey=Math.floor((times[i]+7*3600000)/86400000);
-    map.set(dayKey, hist[i]);
+  for(let i=0;i<opens.length;i++){
+    // Map tất cả các ngày trong khoảng nến (quan trọng với 3D, 1W)
+    const startDay=Math.floor((opens[i]+7*3600000)/86400000);
+    const endDay  =Math.floor((closesTs[i]+7*3600000)/86400000);
+    for(let d=startDay;d<=endDay;d++){
+      map.set(d, hist[i]);
+    }
   }
   return map;
 }
