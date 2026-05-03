@@ -1023,6 +1023,7 @@ let optState = {
   minPnl: 0,
   singleMode: true,
   maxOrders: 1,
+  macdModes: ['1d'],
   sortBy: 'pnl',
   filterPeriod: null,
   filterDir: null,
@@ -1120,6 +1121,13 @@ function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, 
   return trades;
 }
 
+function toggleMacdMode(tf){
+  const idx=optState.macdModes.indexOf(tf);
+  if(idx>=0) optState.macdModes=optState.macdModes.filter(m=>m!==tf);
+  else optState.macdModes=[...optState.macdModes,tf];
+  renderOptimizer();
+}
+
 async function runOptimizer(){
   if(optState.running) return;
   const startTs = parseDate(optState.start, false);
@@ -1128,23 +1136,39 @@ async function runOptimizer(){
 
   optState.running=true; optState.results=[]; optState.progress=0;
   optState.filterPeriod=null; optState.filterDir=null;
-  const combos = OPT_RSI_PERIODS.length * OPT_RSI.length * OPT_TP.length * OPT_SL.length * OPT_DIRS.length * OPT_MACD_MODES.length;
+
+  // Xây dựng danh sách modes cần chạy từ checkbox
+  const selectedTfs = optState.macdModes; // vd: ['1d','3d']
+  if(selectedTfs.length===0){ alert('Chọn ít nhất 1 MACD mode!'); optState.running=false; return; }
+
+  // Mỗi tf → 2 mode: 'none' + 'macd_tf' (trừ 'none' chỉ có 1 mode)
+  // Tính tổng tổ hợp
+  const hasNone = selectedTfs.includes('none');
+  const tfMacd  = selectedTfs.filter(t=>t!=='none'); // ['1d','2d','3d']
+  const totalModes = (hasNone?1:0) + tfMacd.length;
+  const combos = OPT_RSI_PERIODS.length * OPT_RSI.length * OPT_TP.length * OPT_SL.length * OPT_DIRS.length * totalModes;
   optState.total = combos;
   optState.statusMsg = `Đang tải nến 1H ${optState.coin}...`;
   renderOptimizer();
 
-  let candles1H, candles1D, macdMap;
+  let candles1H;
+  // macdMapByTf: { '1d': Map, '2d': Map, '3d': Map }
+  const macdMapByTf = {};
+
   try {
     candles1H = await fetchKlines(optState.coin, startTs, endTs);
-    optState.statusMsg = `Đang tải nến 1D ${optState.coin}...`;
-    renderOptimizer();
-    // Fetch 1D — lấy rộng hơn 60 ngày để MACD warm up đủ
-    const startD = startTs - 60*86400000;
-    const url1D = `https://api.binance.com/api/v3/klines?symbol=${optState.coin}&interval=1d&startTime=${startD}&endTime=${endTs}&limit=1000`;
-    const r1D = await fetch(url1D);
-    if(!r1D.ok) throw new Error('Lỗi fetch 1D: '+r1D.status);
-    candles1D = await r1D.json();
-    macdMap = buildMacdMap(candles1D);
+
+    // Fetch từng timeframe MACD được chọn
+    for(const tf of tfMacd){
+      optState.statusMsg = `Đang tải nến ${tf.toUpperCase()} (MACD)...`;
+      renderOptimizer();
+      const startD = startTs - 60*86400000;
+      const urlTf = `https://api.binance.com/api/v3/klines?symbol=${optState.coin}&interval=${tf}&startTime=${startD}&endTime=${endTs}&limit=1000`;
+      const rTf = await fetch(urlTf);
+      if(!rTf.ok) throw new Error(`Lỗi fetch ${tf}: ${rTf.status}`);
+      const candlesTf = await rTf.json();
+      macdMapByTf[tf] = buildMacdMap(candlesTf);
+    }
   } catch(e) {
     optState.statusMsg = '❌ Lỗi: ' + e.message;
     optState.running = false;
@@ -1157,24 +1181,28 @@ async function runOptimizer(){
   const res = [];
   let done = 0;
 
-  for(const macdMode of OPT_MACD_MODES){
+  // Build danh sách modes để loop
+  // mode object: { key: 'none'|'1d'|'2d'|'3d', label: 'none'|'macd', tf: null|'1d'|'2d'|'3d' }
+  const modes = [];
+  if(hasNone) modes.push({ key:'none', label:'none', tf:null });
+  for(const tf of tfMacd) modes.push({ key:tf, label:'macd', tf });
+
+  for(const mode of modes){
     for(const period of OPT_RSI_PERIODS){
       for(const dir of OPT_DIRS){
         for(const rsi of OPT_RSI){
           for(const tp of OPT_TP){
             for(const sl of OPT_SL){
               let trades;
-              if(macdMode==='none'){
-                // Không dùng MACD — gọi backtest gốc với rsiPeriod
+              if(mode.label==='none'){
                 trades = backtest(candles1H, dir, startTs, endTs, rsi, tp, sl, optState.maxOrders, period);
               } else {
-                // Dùng MACD 1D filter
-                trades = backtestWithMacd(candles1H, dir, startTs, endTs, rsi, tp, sl, optState.maxOrders, period, macdMap);
+                trades = backtestWithMacd(candles1H, dir, startTs, endTs, rsi, tp, sl, optState.maxOrders, period, macdMapByTf[mode.tf]);
               }
               const sum = summarize(trades);
               const wr  = sum.closed>0 ? sum.wins/sum.closed*100 : 0;
               if(sum.closed>=optState.minTrades && wr>=optState.minWR && sum.totalPnl>=optState.minPnl){
-                res.push({ macdMode, period, dir, rsi, tp, sl,
+                res.push({ macdMode: mode.key, period, dir, rsi, tp, sl,
                   trades:sum.closed, wins:sum.wins, losses:sum.losses,
                   wr:parseFloat(wr.toFixed(1)), pnl:parseFloat(sum.totalPnl.toFixed(2)) });
               }
@@ -1223,7 +1251,7 @@ function renderOptimizer(){
 
   let html = `<div class="opt-card">
     <div class="opt-title">🔍 AUTO OPTIMIZER</div>
-    <div class="opt-sub">Thử tự động ${OPT_RSI_PERIODS.length} RSI Period × ${OPT_RSI.length} RSI Level × ${OPT_TP.length} TP × ${OPT_SL.length} SL × 2 chiều × 2 MACD = ${OPT_RSI_PERIODS.length*OPT_RSI.length*OPT_TP.length*OPT_SL.length*2*2} tổ hợp</div>
+    <div class="opt-sub">Thử tự động ${OPT_RSI_PERIODS.length} RSI Period × ${OPT_RSI.length} RSI Level × ${OPT_TP.length} TP × ${OPT_SL.length} SL × 2 chiều × MACD modes được chọn</div>
 
     <div class="opt-grid">
       <div><div class="flbl">Coin</div>
@@ -1283,6 +1311,40 @@ function renderOptimizer(){
             ${opt.label}<br>
             <span style="font-size:9px;font-weight:400;opacity:.7">${opt.desc}</span>
           </button>`).join('')}
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px;">
+      <div style="font-size:10px;color:var(--acc);font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">MACD FILTER (chọn 1 hoặc nhiều)</div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;">
+        ${[
+          {val:'none', label:'Không MACD', desc:'RSI thuần', c:'var(--dim)'},
+          {val:'1d',   label:'MACD 1D',   desc:'Nến 1 ngày', c:'var(--cyn)'},
+          {val:'2d',   label:'MACD 2D',   desc:'Nến 2 ngày', c:'var(--acc)'},
+          {val:'3d',   label:'MACD 3D',   desc:'Nến 3 ngày', c:'#a78bfa'},
+        ].map(opt=>{
+          const on=o.macdModes&&o.macdModes.includes(opt.val);
+          return `<button onclick="toggleMacdMode('${opt.val}')" style="
+            flex:1;padding:8px 4px;border-radius:8px;cursor:pointer;
+            font:700 11px/1 'Outfit',sans-serif;transition:all .15s;
+            background:${on?'rgba(124,111,255,.15)':'var(--bg2)'};
+            border:1.5px solid ${on?opt.c:'var(--b2)'};
+            color:${on?opt.c:'var(--dim)'};">
+            ${on?'☑':'☐'} ${opt.label}<br>
+            <span style="font-size:9px;font-weight:400;opacity:.7">${opt.desc}</span>
+          </button>`;
+        }).join('')}
+      </div>
+      <div style="font-size:10px;color:var(--dim);margin-top:6px;">
+        Tổ hợp sẽ chạy: <span style="color:var(--acc);font-weight:700">${
+          (()=>{
+            const sel=o.macdModes||['1d'];
+            const hasN=sel.includes('none');
+            const tfN=sel.filter(t=>t!=='none').length;
+            const modes=(hasN?1:0)+tfN;
+            return (OPT_RSI_PERIODS.length*OPT_RSI.length*OPT_TP.length*OPT_SL.length*OPT_DIRS.length*modes).toLocaleString();
+          })()
+        }</span>
       </div>
     </div>
 
@@ -1352,9 +1414,9 @@ function renderOptimizer(){
           const wrc=r.wr>=55?'var(--grn)':r.wr>=50?'var(--ora)':'var(--red)';
           const pc=r.pnl>=0?'var(--grn)':'var(--red)';
           const dc=r.dir==='buy'?'var(--grn)':'#ff8899';
-          const macdLabel=r.macdMode==='macd'
-            ?'<span style="color:var(--cyn);font-weight:700">✅ ON</span>'
-            :'<span style="color:var(--dim)">—</span>';
+          const macdLabel=r.macdMode==='none'
+            ?'<span style="color:var(--dim)">—</span>'
+            :`<span style="color:var(--cyn);font-weight:700">${r.macdMode.toUpperCase()}</span>`;
           return `<tr>
             <td style="color:var(--dim)">${i+1}</td>
             <td>${macdLabel}</td>
