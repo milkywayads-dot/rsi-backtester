@@ -253,7 +253,7 @@ function mkSess(id){
     coins:'BTCUSDT, ETHUSDT, BNBUSDT, SOLUSDT, XRPUSDT',
     start:'13/04/2025', end:todayStr(),
     dir:'buy', rsiLevel:50,
-    tp:3, sl:1.5, maxOrders:1, reverseMode:false, flipWindow:5, rsiPeriod:14, macdMode:'none', macdTf:'1d' };
+    tp:3, sl:1.5, maxOrders:1, reverseMode:false, flipWindow:5, rsiPeriod:14, macdMode:'none' };
 }
 function todayStr(){
   const n=new Date();
@@ -510,7 +510,7 @@ async function runSession(){
       if(macdMode!=='none'){
         setStatus('⏳ '+sym+': đang tải nến 1D (MACD)...');
         const startD=startTs-60*86400000;
-        const url1D=`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${session.macdTf||'1d'}&startTime=${startD}&endTime=${endTs}&limit=1000`;
+        const url1D=`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=1d&startTime=${startD}&endTime=${endTs}&limit=1000`;
         const r1D=await fetch(url1D);
         if(r1D.ok){ const c1D=await r1D.json(); macdMap=buildMacdMap(c1D); }
       }
@@ -629,26 +629,7 @@ function renderConfig(){
     </div>
 
     <div style="margin-bottom:14px">
-      <div class="flbl">MACD Filter</div>
-
-      <div style="font-size:10px;color:var(--dim);margin-bottom:5px;letter-spacing:1px;">TIMEFRAME NẾN MACD</div>
-      <div style="display:flex;gap:7px;margin-bottom:8px;">
-        ${[
-          {val:'1d', label:'1D', desc:'1 ngày'},
-          {val:'3d', label:'3D', desc:'3 ngày'},
-          {val:'1w', label:'1W', desc:'1 tuần'},
-        ].map(tf=>`
-          <button onclick="setField(${s.id},'macdTf','${tf.val}')" style="
-            flex:1;padding:8px 4px;border-radius:8px;cursor:pointer;
-            font:700 13px/1 'JetBrains Mono',monospace;transition:all .15s;
-            background:${(s.macdTf||'1d')===tf.val?'rgba(0,207,255,.15)':'var(--bg2)'};
-            border:1.5px solid ${(s.macdTf||'1d')===tf.val?'var(--cyn)':'var(--b2)'};
-            color:${(s.macdTf||'1d')===tf.val?'var(--cyn)':'var(--dim)'};">
-            ${tf.label}<br><span style="font-size:9px;font-weight:400;opacity:.7">${tf.desc}</span>
-          </button>`).join('')}
-      </div>
-
-      <div style="font-size:10px;color:var(--dim);margin-bottom:5px;letter-spacing:1px;">CHIỀU HISTOGRAM</div>
+      <div class="flbl">MACD Filter (nến 1D)</div>
       <div style="display:flex;gap:8px;">
         <button onclick="setField(${s.id},'macdMode','none')" style="
           flex:1;padding:9px 6px;border-radius:8px;cursor:pointer;
@@ -673,11 +654,9 @@ function renderConfig(){
           transition:all .15s;">▼ Hist âm</button>
       </div>
       <div style="font-size:10px;color:var(--dim);margin-top:5px;">
-        ${s.macdMode==='none'
-          ? 'Không lọc theo MACD — trade tất cả tín hiệu RSI'
-          : s.macdMode==='pos'
-            ? `Chỉ trade khi MACD ${(s.macdTf||'1d').toUpperCase()} histogram dương (▲ xu hướng tăng)`
-            : `Chỉ trade khi MACD ${(s.macdTf||'1d').toUpperCase()} histogram âm (▼ xu hướng giảm)`}
+        ${s.macdMode==='none'?'Không lọc theo MACD — trade tất cả tín hiệu RSI':
+          s.macdMode==='pos'?'Chỉ trade khi MACD 1D histogram dương (▲ xu hướng tăng)':
+          'Chỉ trade khi MACD 1D histogram âm (▼ xu hướng giảm)'}
       </div>
     </div>
 
@@ -751,7 +730,7 @@ function renderConfig(){
       <div class="chip">RSI <span class="chip-v" style="color:var(--acc)">${s.rsiLevel}</span></div>
       <div class="chip">Period <span class="chip-v" style="color:var(--acc)">${s.rsiPeriod}</span></div>
       <div class="chip">MACD <span class="chip-v" style="color:${s.macdMode==='none'?'var(--dim)':s.macdMode==='pos'?'var(--grn)':'var(--red)'}">
-        ${s.macdMode==='none'?'OFF':((s.macdTf||'1d').toUpperCase()+' '+(s.macdMode==='pos'?'▲':'▼'))}
+        ${s.macdMode==='none'?'OFF':s.macdMode==='pos'?'▲ DƯƠNG':'▼ ÂM'}
       </span></div>
       <div class="chip">Mode <span class="chip-v" style="color:${s.maxOrders===1?'var(--grn)':s.maxOrders===3?'var(--cyn)':'var(--ora)'}">
         ${s.maxOrders===1?'SINGLE':s.maxOrders===3?'3 LỆNH':'MULTI'}
