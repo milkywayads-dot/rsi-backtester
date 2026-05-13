@@ -229,6 +229,13 @@ td:first-child{text-align:left;font-weight:600;color:var(--text);}
     <button class="btn-api-save" onclick="saveAPI()">💾 Save API</button>
     <button class="btn-api-edit" id="btn-api-edit" onclick="editAPI()">✎ Edit</button>
     <span class="api-status unset" id="api-status">● Not configured</span>
+    <div style="width:1px;height:24px;background:#334155;margin:0 4px"></div>
+    <div class="api-field">
+      <label>Proxy URL</label>
+      <input class="api-input" type="text" id="proxy-url" placeholder="https://xxxx.ngrok-free.app" style="width:230px">
+    </div>
+    <button class="btn-api-save" id="btn-proxy-connect" onclick="connectProxy()" style="background:#7c3aed;border-color:#6d28d9">🔗 Connect</button>
+    <span class="api-status unset" id="proxy-status">● Proxy off</span>
   </div>
 </div>
 
@@ -340,6 +347,10 @@ td:first-child{text-align:left;font-weight:600;color:var(--text);}
     <span class="bot-status stopped" id="bot-status"><span class="bot-dot off" id="bot-dot"></span><span id="bot-status-txt">Bot Stopped</span></span>
     <button class="btn-close-all" onclick="closeAllTrades()">✕ Close All</button>
     <button class="btn-reset" onclick="resetSim()">↺ Reset Sim</button>
+    <button id="btn-live-toggle" onclick="toggleLiveMode()"
+      style="padding:6px 16px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;border:2px solid #334155;background:#1e293b;color:#94a3b8;letter-spacing:.3px;transition:all .2s">
+      🟢 SIM MODE
+    </button>
   </div>
 </div>
 
@@ -437,6 +448,80 @@ td:first-child{text-align:left;font-weight:600;color:var(--text);}
 </div>
 
 <script>
+// ═══════════════════════════════════════════════
+//  PROXY + LIVE MODE
+// ═══════════════════════════════════════════════
+const proxy = { url:'', connected:false, liveMode:false, realBalance:0 };
+
+async function connectProxy(){
+  const url = document.getElementById('proxy-url').value.trim().replace(/\/$/,'');
+  if(!url){ alert('Nhập Proxy URL (ngrok link)!'); return; }
+  if(!apiCreds.key){ alert('Nhập và Save OKX API Key trước!'); return; }
+  proxy.url = url;
+  const btn = document.getElementById('btn-proxy-connect');
+  btn.textContent = '⏳ Connecting...'; btn.disabled = true;
+  log(`Connecting to proxy: ${url}`, 'y');
+  try{
+    const res = await fetch(`${url}/connect`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'1'},
+      body:JSON.stringify({apiKey:apiCreds.key, secret:apiCreds.secret, passphrase:apiCreds.pass})
+    });
+    const data = await res.json();
+    if(data.ok){
+      proxy.connected = true;
+      proxy.realBalance = data.balance;
+      document.getElementById('proxy-status').textContent = `● Connected $${data.balance.toFixed(2)}`;
+      document.getElementById('proxy-status').className = 'api-status set';
+      btn.textContent = '✓ Connected'; btn.style.background='#16a34a';
+      log(`Proxy connected ✓ | OKX Balance: $${data.balance.toFixed(2)} USDT`, 'g');
+    } else {
+      document.getElementById('proxy-status').textContent = '● Error';
+      log(`Proxy error: ${data.error}`, 'r');
+      btn.textContent = '🔗 Connect'; btn.disabled = false;
+    }
+  } catch(e){
+    document.getElementById('proxy-status').textContent = '● Unreachable';
+    log(`Cannot reach proxy: ${e.message}`, 'r');
+    btn.textContent = '🔗 Connect'; btn.disabled = false;
+  }
+}
+
+function toggleLiveMode(){
+  if(!proxy.connected){ alert('Connect to proxy first!\n\nStep 1: Enter OKX API Key + Save\nStep 2: Enter Ngrok URL + Connect'); return; }
+  proxy.liveMode = !proxy.liveMode;
+  const btn = document.getElementById('btn-live-toggle');
+  if(proxy.liveMode){
+    if(!confirm('⚠️ LIVE MODE: Real orders will be placed on OKX!\nMake sure your API key has Trading permission.\n\nContinue?')){ proxy.liveMode=false; return; }
+    btn.textContent = '🔴 LIVE MODE';
+    btn.style.background='#dc2626'; btn.style.color='#fff'; btn.style.borderColor='#b91c1c';
+    document.querySelector('.demo-badge').textContent='🔴 LIVE MODE — REAL ORDERS ON OKX';
+    document.querySelector('.demo-badge').style.background='#fee2e2';
+    document.querySelector('.demo-badge').style.color='#dc2626';
+    log('⚠️ LIVE MODE ON — real orders will be sent to OKX!', 'r');
+  } else {
+    btn.textContent = '🟢 SIM MODE';
+    btn.style.background='#1e293b'; btn.style.color='#94a3b8'; btn.style.borderColor='#334155';
+    document.querySelector('.demo-badge').textContent='⚠ SIMULATION ONLY — NO REAL TRADING — NO REAL MONEY INVOLVED';
+    document.querySelector('.demo-badge').style.background='';
+    document.querySelector('.demo-badge').style.color='';
+    log('Switched back to Simulation mode', 'g');
+  }
+}
+
+// Refresh real balance every 30s when connected
+setInterval(async()=>{
+  if(!proxy.connected) return;
+  try{
+    const res = await fetch(`${proxy.url}/balance`,{headers:{'ngrok-skip-browser-warning':'1'}});
+    const data = await res.json();
+    if(data.ok){
+      proxy.realBalance = data.balance;
+      document.getElementById('proxy-status').textContent=`● Connected $${data.balance.toFixed(2)}`;
+    }
+  }catch(e){}
+}, 30000);
+
 // ═══════════════════════════════════════════════
 //  API KEY MANAGEMENT
 // ═══════════════════════════════════════════════
@@ -702,7 +787,7 @@ function runScan(){
 // ═══════════════════════════════════════════════
 //  SIM — OPEN
 // ═══════════════════════════════════════════════
-function openTrade(row,source='MANUAL'){
+async function openTrade(row,source='MANUAL'){
   const size=parseFloat(document.getElementById('tc-size').value)||100;
   const lev=parseInt(document.getElementById('tc-lev').value)||10;
   const tpPct=parseFloat(document.getElementById('tc-tp').value)||0.4;
@@ -715,6 +800,37 @@ function openTrade(row,source='MANUAL'){
   const tp=dir==='LONG'?entry*(1+tpPct/100):entry*(1-tpPct/100);
   const sl=dir==='LONG'?entry*(1-slPct/100):entry*(1+slPct/100);
   const id=`${row.symbol}_${sim.nextId++}`;
+
+  if(proxy.liveMode){
+    // ── LIVE ORDER via proxy ──
+    const okxSym = row.symbol.replace('-USDT','/USDT:USDT'); // BTC-USDT → BTC/USDT:USDT
+    const side = dir==='LONG'?'buy':'sell';
+    try{
+      log(`[LIVE] Placing ${dir} ${row.symbol} ${lev}x $${size}...`,'y');
+      const res = await fetch(`${proxy.url}/order`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'1'},
+        body:JSON.stringify({symbol:okxSym, side, size:qty, leverage:lev, tp:tpPct, sl:slPct})
+      });
+      const data = await res.json();
+      if(data.ok){
+        const realEntry = data.price || entry;
+        const realQty   = notional / realEntry;
+        const realTp    = dir==='LONG'?realEntry*(1+tpPct/100):realEntry*(1-tpPct/100);
+        const realSl    = dir==='LONG'?realEntry*(1-slPct/100):realEntry*(1+slPct/100);
+        sim.positions[id]={id,symbol:row.symbol,dir,entry:realEntry,currentPrice:realEntry,
+          tp:realTp,sl:realSl,tpPct,slPct,size,lev,qty:realQty,notional,
+          openTs:Date.now(),source,orderId:data.orderId,live:true};
+        sim.balance-=size;
+        log(`[LIVE ✓] ${dir} ${row.symbol} @ ${fmtPrice(realEntry)} | OrderID:${data.orderId} | TP/SL set server-side`,'g');
+      } else {
+        log(`[LIVE ✗] Order failed: ${data.error}`,'r');
+      }
+    } catch(e){ log(`[LIVE ✗] Error: ${e.message}`,'r'); }
+    return;
+  }
+
+  // ── SIMULATION ──
   sim.positions[id]={id,symbol:row.symbol,dir,entry,currentPrice:entry,tp,sl,tpPct,slPct,size,lev,qty,notional,openTs:Date.now(),source};
   sim.balance-=size;
   log(`[${source}] ${dir} ${row.symbol} @ ${fmtPrice(entry)} | TP:${fmtPrice(tp)} | SL:${fmtPrice(sl)} | ${lev}x`,'g');
@@ -741,9 +857,33 @@ function updatePositions(results){
 // ═══════════════════════════════════════════════
 const FEE_RATE = 0.0005; // 0.05% per side (OKX futures taker fee)
 
-function closeTrade(id,reason='MANUAL'){
+async function closeTrade(id,reason='MANUAL'){
   const pos=sim.positions[id];
   if(!pos)return;
+
+  if(pos.live && proxy.liveMode){
+    // ── LIVE CLOSE via proxy ──
+    const okxSym = pos.symbol.replace('-USDT','/USDT:USDT');
+    const side   = pos.dir==='LONG'?'buy':'sell'; // reverse
+    try{
+      log(`[LIVE] Closing ${pos.dir} ${pos.symbol}...`,'y');
+      const res = await fetch(`${proxy.url}/close`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'1'},
+        body:JSON.stringify({symbol:okxSym, side:pos.dir==='LONG'?'buy':'sell', size:pos.qty})
+      });
+      const data = await res.json();
+      if(data.ok){
+        log(`[LIVE ✓] Closed ${pos.symbol} | OrderID:${data.orderId}`,'g');
+      } else {
+        log(`[LIVE ✗] Close failed: ${data.error}`,'r');
+      }
+    } catch(e){ log(`[LIVE ✗] Close error: ${e.message}`,'r'); }
+    // Still remove from local tracking
+    delete sim.positions[id];
+    return;
+  }
+
   const exit=pos.currentPrice;
   const raw=pos.dir==='LONG'?(exit-pos.entry)*pos.qty:(pos.entry-exit)*pos.qty;
   const feeOpen =pos.notional*FEE_RATE;
