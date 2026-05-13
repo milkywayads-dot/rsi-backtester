@@ -104,6 +104,18 @@ select:focus{border-color:var(--blue);}
 .sim-label{color:var(--purple);font-size:11px;font-weight:600;white-space:nowrap;}
 .btn-reset{background:var(--red-bg);border:1px solid var(--red-bd);color:var(--red);padding:5px 12px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;}
 .btn-reset:hover{background:var(--red);color:#fff;}
+.btn-bot-start{background:#16a34a;border:1px solid #15803d;color:#fff;padding:6px 18px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;letter-spacing:.3px;box-shadow:0 1px 3px rgba(22,163,74,.3);}
+.btn-bot-start:hover{background:#15803d;}
+.btn-bot-stop{background:#dc2626;border:1px solid #b91c1c;color:#fff;padding:6px 18px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;transition:all .15s;letter-spacing:.3px;box-shadow:0 1px 3px rgba(220,38,38,.3);display:none;}
+.btn-bot-stop:hover{background:#b91c1c;}
+.btn-close-all{background:var(--red-bg);border:1px solid var(--red-bd);color:var(--red);padding:5px 14px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;transition:all .15s;}
+.btn-close-all:hover{background:var(--red);color:#fff;}
+.bot-status{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;}
+.bot-status.running{background:var(--green-bg);border:1px solid var(--green-bd);color:var(--green);}
+.bot-status.stopped{background:var(--surface2);border:1px solid var(--border2);color:var(--muted);}
+.bot-dot{width:6px;height:6px;border-radius:50%;}
+.bot-dot.on{background:var(--green);animation:pulse 1.5s infinite;}
+.bot-dot.off{background:var(--muted);}
 
 /* ── POSITION SUMMARY ── */
 .pos-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border);border-radius:0;margin:0;}
@@ -314,16 +326,19 @@ td:first-child{text-align:left;font-weight:600;color:var(--text);}
       <input type="number" id="tc-sl" value="0.2" min="0.05" max="10" step="0.05">
     </div>
     <div class="sim-group">
-      <span class="sim-label">Auto-Trade</span>
+      <span class="sim-label">Min Spread Bot</span>
       <select id="tc-auto">
-        <option value="0">Off</option>
         <option value="0.3">Spread &gt; 0.3%</option>
         <option value="0.4">Spread &gt; 0.4%</option>
-        <option value="0.5">Spread &gt; 0.5%</option>
+        <option value="0.5" selected>Spread &gt; 0.5%</option>
         <option value="0.8">Spread &gt; 0.8%</option>
         <option value="1.0">Spread &gt; 1.0%</option>
       </select>
     </div>
+    <button class="btn-bot-start" id="btn-bot-start" onclick="startBot()">▶ Start Bot</button>
+    <button class="btn-bot-stop"  id="btn-bot-stop"  onclick="stopBot()">⏹ Stop Bot</button>
+    <span class="bot-status stopped" id="bot-status"><span class="bot-dot off" id="bot-dot"></span><span id="bot-status-txt">Bot Stopped</span></span>
+    <button class="btn-close-all" onclick="closeAllTrades()">✕ Close All</button>
     <button class="btn-reset" onclick="resetSim()">↺ Reset Sim</button>
   </div>
 </div>
@@ -331,7 +346,7 @@ td:first-child{text-align:left;font-weight:600;color:var(--text);}
 <!-- ══════════════════════════════════════
      OPEN POSITIONS
 ══════════════════════════════════════ -->
-<div class="section-divider">📊 Open Positions <span id="pos-count" style="color:var(--blue);font-weight:800">(0)</span></div>
+<div class="section-divider">📊 Open Positions <span id="pos-count" style="color:var(--blue);font-weight:800">(0)</span> <button class="btn-close-all" style="margin-left:8px;font-size:10px;padding:2px 10px" onclick="closeAllTrades()">✕ Close All</button></div>
 <div class="card">
   <div class="pos-grid" style="border-bottom:1px solid var(--border);">
     <div class="pos-stat"><div class="pos-stat-val c-blue" id="ps-open">0</div><div class="pos-stat-lbl">Open</div></div>
@@ -377,8 +392,12 @@ td:first-child{text-align:left;font-weight:600;color:var(--text);}
     <table>
       <thead><tr>
         <th>Symbol</th><th>Side</th><th>Entry</th><th>Exit</th>
-        <th>Size</th><th>Lev</th><th>Fee Open</th><th>Fee Close</th><th>Total Fee</th>
-        <th>P&amp;L</th><th>P&amp;L %</th>
+        <th>Size</th><th>Lev</th>
+        <th>TP %</th>
+        <th>Total Fee (%)</th>
+        <th>P&amp;L (non fee) $</th>
+        <th>P&amp;L %</th>
+        <th>P&amp;L Total $</th>
         <th>Result</th><th>Duration</th><th>Reason</th>
       </tr></thead>
       <tbody id="hist-body"><tr><td colspan="14" class="empty">No closed trades yet</td></tr></tbody>
@@ -471,7 +490,34 @@ const state = {
 const sim = {
   balance:10000,positions:{},history:[],
   wins:0,losses:0,realized:0,nextId:1,autoTraded:{},
+  botRunning:false,
 };
+
+function startBot(){
+  sim.botRunning=true;
+  document.getElementById('btn-bot-start').style.display='none';
+  document.getElementById('btn-bot-stop').style.display='inline-block';
+  document.getElementById('bot-status').className='bot-status running';
+  document.getElementById('bot-dot').className='bot-dot on';
+  const thresh=document.getElementById('tc-auto').value;
+  document.getElementById('bot-status-txt').textContent=`Bot Running (>${thresh}%)`;
+  log(`Bot started — auto-trade spread > ${thresh}%`,'g');
+}
+function stopBot(){
+  sim.botRunning=false;
+  document.getElementById('btn-bot-start').style.display='inline-block';
+  document.getElementById('btn-bot-stop').style.display='none';
+  document.getElementById('bot-status').className='bot-status stopped';
+  document.getElementById('bot-dot').className='bot-dot off';
+  document.getElementById('bot-status-txt').textContent='Bot Stopped';
+  log('Bot stopped','y');
+}
+function closeAllTrades(){
+  const ids=Object.keys(sim.positions);
+  if(!ids.length){log('No open positions to close','y');return;}
+  ids.forEach(id=>closeTrade(id,'CLOSE ALL'));
+  log(`Closed ${ids.length} position(s)`,'y');
+}
 
 // ═══════════════════════════════════════════════
 //  LOGGING
@@ -623,9 +669,9 @@ function runScan(){
 
   updatePositions(results);
 
-  // Auto-trade
-  const autoThresh=parseFloat(document.getElementById('tc-auto').value);
-  if(autoThresh>0){
+  // Auto-trade (only when bot is running)
+  if(sim.botRunning){
+    const autoThresh=parseFloat(document.getElementById('tc-auto').value);
     const top=opps[0];
     if(top&&top.absSpread>=autoThresh&&top.direction!=='NEU'){
       const lastAuto=sim.autoTraded[top.symbol]||0;
@@ -669,7 +715,7 @@ function openTrade(row,source='MANUAL'){
   const tp=dir==='LONG'?entry*(1+tpPct/100):entry*(1-tpPct/100);
   const sl=dir==='LONG'?entry*(1-slPct/100):entry*(1+slPct/100);
   const id=`${row.symbol}_${sim.nextId++}`;
-  sim.positions[id]={id,symbol:row.symbol,dir,entry,currentPrice:entry,tp,sl,size,lev,qty,notional,openTs:Date.now(),source};
+  sim.positions[id]={id,symbol:row.symbol,dir,entry,currentPrice:entry,tp,sl,tpPct,slPct,size,lev,qty,notional,openTs:Date.now(),source};
   sim.balance-=size;
   log(`[${source}] ${dir} ${row.symbol} @ ${fmtPrice(entry)} | TP:${fmtPrice(tp)} | SL:${fmtPrice(sl)} | ${lev}x`,'g');
 }
@@ -710,7 +756,17 @@ function closeTrade(id,reason='MANUAL'){
   sim.balance+=pos.size+pnl;
   sim.realized+=pnl;
   if(won)sim.wins++;else sim.losses++;
-  sim.history.unshift({symbol:pos.symbol,dir:pos.dir,entry:pos.entry,exit,size:pos.size,lev:pos.lev,feeOpen,feeClose,fees,pnl,pnlPct,won,dur,reason,ts:Date.now()});
+  const rawPnlPct=(raw/pos.size)*100;
+  const feePct   =(fees/pos.size)*100;
+  sim.history.unshift({
+    symbol:pos.symbol,dir:pos.dir,entry:pos.entry,exit,
+    size:pos.size,lev:pos.lev,
+    tpPct:pos.tpPct,slPct:pos.slPct,
+    feeOpen,feeClose,fees,feePct,
+    rawPnl:raw,rawPnlPct,
+    pnl,pnlPct,
+    won,dur,reason,ts:Date.now()
+  });
   delete sim.positions[id];
   log(`${won?'✅':'❌'} CLOSED ${pos.dir} ${pos.symbol} | P&L: ${pnl>=0?'+':''}$${pnl.toFixed(2)} (${pnlPct.toFixed(2)}%) | ${reason}`,won?'g':'r');
 }
@@ -807,13 +863,15 @@ function renderHistory(){
   document.getElementById('hist-count').textContent=`(${sim.history.length})`;
   if(!sim.history.length){tbody.innerHTML=`<tr><td colspan="11" class="empty">No closed trades yet</td></tr>`;return;}
   tbody.innerHTML=sim.history.slice(0,40).map(t=>{
-    const pCls=t.pnl>0?'pnl-pos':'pnl-neg';
-    const sigCls=t.dir==='LONG'?'long':'short';
-    const dur=t.dur>=60?`${Math.floor(t.dur/60)}m${t.dur%60}s`:`${t.dur}s`;
-    const reason=t.reason.includes('TP')?'tag-tp':t.reason.includes('SL')?'tag-sl':t.reason==='AUTO'?'tag-auto':'tag-man';
-    const feeOpen =t.feeOpen!=null?t.feeOpen:(t.size*(t.lev||1)*FEE_RATE);
-    const feeClose=t.feeClose!=null?t.feeClose:(t.size*(t.lev||1)*FEE_RATE);
-    const feesTotal=feeOpen+feeClose;
+    const pCls    = t.pnl>0?'pnl-pos':'pnl-neg';
+    const rawCls  = t.rawPnl>0?'pnl-pos':'pnl-neg';
+    const sigCls  = t.dir==='LONG'?'long':'short';
+    const dur     = t.dur>=60?`${Math.floor(t.dur/60)}m${t.dur%60}s`:`${t.dur}s`;
+    const rTag    = t.reason.includes('TP')?'tag-tp':t.reason.includes('SL')?'tag-sl':t.reason.includes('ALL')||t.reason==='MANUAL'?'tag-man':'tag-auto';
+    // fallback cho trade cũ chưa có rawPnl
+    const rawPnl  = t.rawPnl   != null ? t.rawPnl  : (t.pnl + (t.fees||0));
+    const feePct  = t.feePct   != null ? t.feePct  : ((t.fees||0)/t.size*100);
+    const tpPct   = t.tpPct    != null ? t.tpPct   : '—';
     return `<tr>
       <td><span class="base">${t.symbol.replace('-USDT','')}</span><span class="quote">/USDT</span></td>
       <td><span class="signal ${sigCls}">${t.dir}</span></td>
@@ -821,14 +879,14 @@ function renderHistory(){
       <td>${fmtPrice(t.exit)}</td>
       <td>$${t.size}</td>
       <td style="color:var(--purple);font-weight:700">${t.lev}x</td>
-      <td style="color:var(--orange);font-size:11px">-$${feeOpen.toFixed(3)}</td>
-      <td style="color:var(--orange);font-size:11px">-$${feeClose.toFixed(3)}</td>
-      <td style="color:var(--red);font-size:11px;font-weight:600">-$${feesTotal.toFixed(3)}</td>
-      <td class="${pCls}">${t.pnl>=0?'+':''}$${t.pnl.toFixed(2)}</td>
-      <td class="${pCls}">${t.pnlPct>=0?'+':''}${t.pnlPct.toFixed(2)}%</td>
+      <td style="color:var(--blue);font-size:11px">${typeof tpPct==='number'?tpPct.toFixed(2)+'%':tpPct}</td>
+      <td style="color:var(--red);font-size:11px;font-weight:600">-${feePct.toFixed(3)}%</td>
+      <td class="${rawCls}">${rawPnl>=0?'+':''}$${rawPnl.toFixed(3)}</td>
+      <td class="${pCls};font-weight:700">${t.pnlPct>=0?'+':''}${t.pnlPct.toFixed(2)}%</td>
+      <td class="${pCls}" style="font-weight:700">${t.pnl>=0?'+':''}$${t.pnl.toFixed(2)}</td>
       <td><span class="tag ${t.won?'tag-win':'tag-loss'}">${t.won?'WIN':'LOSS'}</span></td>
       <td class="age">${dur}</td>
-      <td><span class="tag ${reason}">${t.reason}</span></td>
+      <td><span class="tag ${rTag}">${t.reason}</span></td>
     </tr>`;
   }).join('');
 }
