@@ -6,387 +6,484 @@
 <title>Crypto Arb Scanner | Binance vs OKX</title>
 <style>
 :root {
-  --bg:       #0a0e1a;
-  --surface:  #111827;
-  --surface2: #1a2235;
-  --border:   #1f2d45;
-  --text:     #e2e8f0;
-  --muted:    #64748b;
-  --green:    #10b981;
-  --red:      #ef4444;
-  --yellow:   #f59e0b;
-  --blue:     #3b82f6;
-  --purple:   #8b5cf6;
-  --orange:   #f97316;
+  --bg:        #f8fafc;
+  --surface:   #ffffff;
+  --surface2:  #f1f5f9;
+  --border:    #e2e8f0;
+  --border2:   #cbd5e1;
+  --text:      #0f172a;
+  --text2:     #334155;
+  --muted:     #64748b;
+  --green:     #16a34a;
+  --green-bg:  #dcfce7;
+  --green-bd:  #86efac;
+  --red:       #dc2626;
+  --red-bg:    #fee2e2;
+  --red-bd:    #fca5a5;
+  --blue:      #2563eb;
+  --blue-bg:   #dbeafe;
+  --blue-bd:   #93c5fd;
+  --purple:    #7c3aed;
+  --purp-bg:   #ede9fe;
+  --purp-bd:   #c4b5fd;
+  --yellow:    #d97706;
+  --yel-bg:    #fef3c7;
+  --yel-bd:    #fcd34d;
+  --orange:    #ea580c;
+  --shadow:    0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
+  --shadow2:   0 4px 6px rgba(0,0,0,.07), 0 2px 4px rgba(0,0,0,.06);
 }
 *{margin:0;padding:0;box-sizing:border-box;}
-body{background:var(--bg);color:var(--text);font-family:'Courier New',monospace;font-size:13px;min-height:100vh;}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:13px;min-height:100vh;}
 
-/* HEADER */
-.header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;position:sticky;top:0;z-index:100;}
-.header h1{font-size:15px;font-weight:bold;color:var(--blue);letter-spacing:1px;}
-.header p{color:var(--muted);font-size:10px;margin-top:1px;}
+/* ── TOPBAR (API) ── */
+.topbar{background:var(--text);color:#fff;padding:8px 20px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
+.topbar-title{font-size:11px;font-weight:600;letter-spacing:.5px;color:#94a3b8;text-transform:uppercase;}
+.api-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.api-field{display:flex;align-items:center;gap:5px;}
+.api-field label{font-size:10px;color:#94a3b8;white-space:nowrap;}
+.api-input{background:#1e293b;border:1px solid #334155;color:#e2e8f0;padding:4px 8px;border-radius:5px;font-family:inherit;font-size:11px;outline:none;width:160px;transition:border .2s;}
+.api-input:focus{border-color:#3b82f6;}
+.api-masked{background:#1e293b;border:1px solid #334155;color:#94a3b8;padding:4px 8px;border-radius:5px;font-size:11px;letter-spacing:2px;display:none;}
+.btn-api-save{background:#2563eb;color:#fff;border:none;padding:4px 12px;border-radius:5px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;transition:background .2s;}
+.btn-api-save:hover{background:#1d4ed8;}
+.btn-api-edit{background:#334155;color:#94a3b8;border:none;padding:4px 10px;border-radius:5px;font-size:10px;cursor:pointer;transition:background .2s;display:none;}
+.btn-api-edit:hover{background:#475569;color:#fff;}
+.api-status{font-size:10px;padding:2px 8px;border-radius:10px;}
+.api-status.set{background:rgba(22,163,74,.2);color:#4ade80;}
+.api-status.unset{background:rgba(100,116,139,.15);color:#94a3b8;}
+
+/* ── HEADER ── */
+.header{background:var(--surface);border-bottom:2px solid var(--border);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;box-shadow:var(--shadow);}
+.header h1{font-size:18px;font-weight:800;color:var(--text);letter-spacing:-.3px;}
+.header h1 span{color:var(--blue);}
+.header p{color:var(--muted);font-size:11px;margin-top:2px;}
 .ws-badges{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
-.badge{display:flex;align-items:center;gap:5px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:3px 9px;font-size:11px;}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--muted);transition:background .3s;}
-.dot.connected{background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 2s infinite;}
+.badge{display:flex;align-items:center;gap:5px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:4px 10px;font-size:11px;font-weight:500;color:var(--text2);}
+.dot{width:7px;height:7px;border-radius:50%;background:#cbd5e1;flex-shrink:0;}
+.dot.connected{background:var(--green);box-shadow:0 0 0 3px var(--green-bg);animation:pulse 2s infinite;}
 .dot.connecting{background:var(--yellow);animation:blink .8s infinite;}
 .dot.error{background:var(--red);}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
 
-/* STATS BAR */
-.stats-bar{display:flex;gap:1px;background:var(--border);border-bottom:1px solid var(--border);}
-.stat{flex:1;background:var(--surface);padding:8px 12px;text-align:center;}
-.stat-val{font-size:18px;font-weight:bold;}
-.stat-lbl{font-size:10px;color:var(--muted);margin-top:1px;text-transform:uppercase;letter-spacing:.8px;}
-.green{color:var(--green);} .yellow{color:var(--yellow);} .blue{color:var(--blue);} .red{color:var(--red);} .purple{color:var(--purple);}
+/* ── STATS BAR ── */
+.stats-bar{display:grid;grid-template-columns:repeat(6,1fr);gap:0;background:var(--border);border-bottom:2px solid var(--border2);}
+.stat{background:var(--surface);padding:12px 16px;text-align:center;border-right:1px solid var(--border);}
+.stat:last-child{border-right:none;}
+.stat-val{font-size:20px;font-weight:800;color:var(--text);line-height:1;}
+.stat-lbl{font-size:10px;color:var(--muted);margin-top:3px;text-transform:uppercase;letter-spacing:.8px;font-weight:500;}
+.c-green{color:var(--green)!important;} .c-red{color:var(--red)!important;}
+.c-blue{color:var(--blue)!important;} .c-purple{color:var(--purple)!important;}
+.c-yellow{color:var(--yellow)!important;}
 
-/* CONTROLS */
-.controls{padding:10px 20px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--surface2);border-bottom:1px solid var(--border);}
-.ctrl-label{color:var(--muted);font-size:11px;}
-input[type=range]{accent-color:var(--blue);cursor:pointer;}
-input[type=text]{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:5px;font-family:inherit;font-size:12px;outline:none;width:120px;}
-input[type=text]:focus{border-color:var(--blue);}
-select{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:5px;font-family:inherit;font-size:12px;cursor:pointer;outline:none;}
-.spread-val{color:var(--blue);font-weight:bold;min-width:35px;display:inline-block;}
+/* ── CARD ── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);margin-bottom:16px;}
+.card-header{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px;background:var(--surface2);border-radius:10px 10px 0 0;}
+.card-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--text2);display:flex;align-items:center;gap:6px;}
+.card-title .icon{font-size:14px;}
+.card-body{padding:0;}
+.page{padding:16px 20px;}
 
-/* TRADE CONFIG PANEL */
-.trade-config{padding:10px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;background:rgba(139,92,246,.07);border-bottom:1px solid rgba(139,92,246,.2);}
-.trade-config .ctrl-label{color:var(--purple);}
-.tc-title{color:var(--purple);font-size:11px;font-weight:bold;letter-spacing:1px;text-transform:uppercase;}
-input[type=number]{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:5px;font-family:inherit;font-size:12px;outline:none;width:70px;text-align:right;}
-input[type=number]:focus{border-color:var(--purple);}
+/* ── CONTROLS CARD ── */
+.ctrl-grid{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 16px;}
+.ctrl-group{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:6px 10px;}
+.ctrl-label{color:var(--muted);font-size:11px;font-weight:500;white-space:nowrap;}
+input[type=range]{accent-color:var(--blue);cursor:pointer;width:100px;}
+input[type=text],input[type=number]{background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:5px;font-family:inherit;font-size:12px;outline:none;}
+input[type=text]{width:110px;}
+input[type=number]{width:68px;text-align:right;}
+input[type=text]:focus,input[type=number]:focus{border-color:var(--blue);box-shadow:0 0 0 2px var(--blue-bg);}
+select{background:var(--surface);border:1px solid var(--border2);color:var(--text);padding:5px 8px;border-radius:5px;font-family:inherit;font-size:12px;cursor:pointer;outline:none;}
+select:focus{border-color:var(--blue);}
+.spread-val{color:var(--blue);font-weight:700;min-width:38px;display:inline-block;font-size:13px;}
 
-/* SECTION */
-.section{padding:14px 20px;}
-.section-title{font-size:11px;font-weight:bold;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:8px;display:flex;align-items:center;gap:8px;}
-.section-title span{color:var(--text);}
+/* ── SIM CONFIG ── */
+.sim-config-grid{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 16px;}
+.sim-group{display:flex;align-items:center;gap:6px;background:var(--purp-bg);border:1px solid var(--purp-bd);border-radius:7px;padding:5px 10px;}
+.sim-label{color:var(--purple);font-size:11px;font-weight:600;white-space:nowrap;}
+.btn-reset{background:var(--red-bg);border:1px solid var(--red-bd);color:var(--red);padding:5px 12px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;}
+.btn-reset:hover{background:var(--red);color:#fff;}
 
-/* TABLE */
-.table-wrap{overflow-x:auto;border-radius:7px;border:1px solid var(--border);}
+/* ── POSITION SUMMARY ── */
+.pos-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border);border-radius:0;margin:0;}
+.pos-stat{background:var(--surface2);padding:10px 14px;text-align:center;}
+.pos-stat-val{font-size:17px;font-weight:800;color:var(--text);}
+.pos-stat-lbl{font-size:10px;color:var(--muted);margin-top:2px;text-transform:uppercase;letter-spacing:.7px;}
+
+/* ── TABLE ── */
+.table-wrap{overflow-x:auto;}
 table{width:100%;border-collapse:collapse;}
-thead tr{background:var(--surface2);border-bottom:1px solid var(--border);}
-thead th{padding:7px 10px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);white-space:nowrap;user-select:none;}
+thead tr{background:var(--surface2);}
+thead th{padding:9px 12px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);white-space:nowrap;font-weight:600;border-bottom:2px solid var(--border);}
 thead th:first-child{text-align:left;}
-tbody tr{border-bottom:1px solid var(--border);transition:background .12s;}
+tbody tr{border-bottom:1px solid var(--border);transition:background .1s;}
 tbody tr:last-child{border-bottom:none;}
-tbody tr:hover{background:var(--surface2);}
-tbody tr.hot{background:rgba(16,185,129,.04);}
-tbody tr.hot:hover{background:rgba(16,185,129,.09);}
-tbody tr.pos-open{background:rgba(59,130,246,.06);}
-tbody tr.pos-win{background:rgba(16,185,129,.08);animation:flashG .5s;}
-tbody tr.pos-loss{background:rgba(239,68,68,.08);animation:flashR .5s;}
-td{padding:8px 10px;text-align:right;font-size:12px;white-space:nowrap;}
-td:first-child{text-align:left;font-weight:bold;}
-.base{color:var(--blue);}
-.quote{color:var(--muted);font-size:10px;}
-.spread-pos{color:var(--green);font-weight:bold;}
-.spread-neg{color:var(--red);font-weight:bold;}
+tbody tr:hover{background:#f8fafc;}
+tbody tr.hot{background:#f0fdf4;}
+tbody tr.hot:hover{background:#dcfce7;}
+tbody tr.pos-open{background:#eff6ff;}
+tbody tr.pos-open:hover{background:#dbeafe;}
+td{padding:9px 12px;text-align:right;font-size:12px;white-space:nowrap;color:var(--text2);}
+td:first-child{text-align:left;font-weight:600;color:var(--text);}
+.base{color:var(--blue);font-weight:700;}
+.quote{color:var(--muted);font-size:10px;font-weight:400;}
+.spread-pos{color:var(--green);font-weight:700;}
+.spread-neg{color:var(--red);font-weight:700;}
 .spread-neu{color:var(--muted);}
-.signal{display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:bold;letter-spacing:.8px;}
-.signal.long {background:rgba(16,185,129,.2);color:var(--green);border:1px solid rgba(16,185,129,.3);}
-.signal.short{background:rgba(239,68,68,.2); color:var(--red);  border:1px solid rgba(239,68,68,.3);}
-.signal.neu  {background:rgba(100,116,139,.2);color:var(--muted);}
+.signal{display:inline-flex;align-items:center;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.5px;}
+.signal.long {background:var(--green-bg);color:var(--green);border:1px solid var(--green-bd);}
+.signal.short{background:var(--red-bg);color:var(--red);border:1px solid var(--red-bd);}
+.signal.neu  {background:var(--surface2);color:var(--muted);border:1px solid var(--border);}
 .bar-wrap{display:inline-block;width:55px;vertical-align:middle;}
-.bar-bg{background:var(--border);border-radius:2px;height:4px;width:100%;}
-.bar-fill{height:4px;border-radius:2px;transition:width .3s;}
+.bar-bg{background:var(--border2);border-radius:2px;height:5px;width:100%;}
+.bar-fill{height:5px;border-radius:2px;transition:width .3s;}
 .age{color:var(--muted);font-size:10px;}
-@keyframes flashG{0%{background:rgba(16,185,129,.3)}100%{background:transparent}}
-@keyframes flashR{0%{background:rgba(239,68,68,.3)}100%{background:transparent}}
-
-/* SIM TRADE BUTTON */
-.btn-sim{
-  background:rgba(139,92,246,.2);
-  border:1px solid rgba(139,92,246,.4);
-  color:var(--purple);
-  padding:3px 9px;
-  border-radius:4px;
-  font-size:10px;
-  font-weight:bold;
-  cursor:pointer;
-  font-family:inherit;
-  letter-spacing:.5px;
-  transition:all .15s;
-  white-space:nowrap;
-}
-.btn-sim:hover{background:rgba(139,92,246,.4);color:#fff;}
-.btn-sim:active{transform:scale(.96);}
-.btn-sim.long-btn {background:rgba(16,185,129,.2);border-color:rgba(16,185,129,.4);color:var(--green);}
-.btn-sim.long-btn:hover{background:rgba(16,185,129,.4);color:#fff;}
-.btn-sim.short-btn{background:rgba(239,68,68,.2);border-color:rgba(239,68,68,.4);color:var(--red);}
-.btn-sim.short-btn:hover{background:rgba(239,68,68,.4);color:#fff;}
-.btn-close{background:rgba(100,116,139,.15);border:1px solid var(--border);color:var(--muted);padding:2px 7px;border-radius:4px;font-size:10px;cursor:pointer;font-family:inherit;transition:all .15s;}
-.btn-close:hover{background:rgba(239,68,68,.2);color:var(--red);border-color:rgba(239,68,68,.3);}
-
-/* P&L colors */
-.pnl-pos{color:var(--green);font-weight:bold;}
-.pnl-neg{color:var(--red);font-weight:bold;}
+.pnl-pos{color:var(--green);font-weight:700;}
+.pnl-neg{color:var(--red);font-weight:700;}
 .pnl-neu{color:var(--muted);}
 
-/* POSITIONS PANEL */
-.pos-summary{display:flex;gap:1px;background:var(--border);border-radius:7px;overflow:hidden;margin-bottom:10px;}
-.pos-stat{flex:1;background:var(--surface);padding:8px 12px;text-align:center;}
-.pos-stat-val{font-size:16px;font-weight:bold;}
-.pos-stat-lbl{font-size:10px;color:var(--muted);margin-top:1px;}
+/* ── BUTTONS ── */
+.btn-sim{padding:4px 10px;border-radius:5px;font-size:10px;font-weight:700;cursor:pointer;font-family:inherit;letter-spacing:.3px;transition:all .15s;border:1px solid;white-space:nowrap;}
+.btn-long {background:var(--green-bg);border-color:var(--green-bd);color:var(--green);}
+.btn-long:hover{background:var(--green);color:#fff;}
+.btn-short{background:var(--red-bg);border-color:var(--red-bd);color:var(--red);}
+.btn-short:hover{background:var(--red);color:#fff;}
+.btn-sim:disabled{opacity:.35;cursor:not-allowed;}
+.btn-close{background:var(--surface2);border:1px solid var(--border2);color:var(--muted);padding:3px 8px;border-radius:4px;font-size:10px;cursor:pointer;font-family:inherit;transition:all .15s;}
+.btn-close:hover{background:var(--red-bg);color:var(--red);border-color:var(--red-bd);}
 
-/* LOG */
-.log-box{background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:8px 12px;max-height:110px;overflow-y:auto;font-size:11px;color:var(--muted);}
-.log-line{padding:1px 0;border-bottom:1px solid var(--border);}
-.log-line:last-child{border-bottom:none;}
-.log-line .t{color:var(--blue);margin-right:6px;}
-.log-line .g{color:var(--green);}
-.log-line .r{color:var(--red);}
-.log-line .y{color:var(--yellow);}
+/* ── TAG ── */
+.tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;}
+.tag-win {background:var(--green-bg);color:var(--green);}
+.tag-loss{background:var(--red-bg);color:var(--red);}
+.tag-auto{background:var(--blue-bg);color:var(--blue);}
+.tag-tp  {background:var(--green-bg);color:var(--green);}
+.tag-sl  {background:var(--red-bg);color:var(--red);}
+.tag-man {background:var(--surface2);color:var(--muted);}
 
-/* EMPTY */
-.empty{padding:30px;text-align:center;color:var(--muted);}
-.loader{display:inline-block;width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:8px;}
+/* ── DIVIDER SECTIONS ── */
+.section-divider{display:flex;align-items:center;gap:10px;padding:16px 20px 8px;color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;}
+.section-divider::before,.section-divider::after{content:'';flex:1;height:1px;background:var(--border2);}
+
+/* ── EMPTY ── */
+.empty{padding:28px;text-align:center;color:var(--muted);font-size:12px;}
+.loader{display:inline-block;width:16px;height:16px;border:2px solid var(--border2);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:6px;}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-/* FOOTER */
-.footer{text-align:center;padding:14px;color:var(--muted);font-size:10px;border-top:1px solid var(--border);margin-top:8px;}
-.demo-badge{display:inline-block;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.3);color:var(--yellow);padding:2px 9px;border-radius:4px;font-size:10px;font-weight:bold;letter-spacing:1px;margin-bottom:4px;}
+/* ── LOG ── */
+.log-box{background:var(--surface2);border-top:1px solid var(--border);padding:10px 14px;max-height:120px;overflow-y:auto;font-size:11px;font-family:'Courier New',monospace;border-radius:0 0 10px 10px;}
+.log-line{padding:2px 0;border-bottom:1px solid var(--border);}
+.log-line:last-child{border-bottom:none;}
+.log-t{color:var(--blue);margin-right:6px;font-size:10px;}
+.log-g{color:var(--green);}
+.log-r{color:var(--red);}
+.log-y{color:var(--yellow);}
 
-::-webkit-scrollbar{width:4px;height:4px;}
-::-webkit-scrollbar-track{background:var(--surface);}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
-@media(max-width:600px){.stats-bar{flex-wrap:wrap;}.stat{min-width:45%;}}
+/* ── FOOTER ── */
+.footer{text-align:center;padding:14px;color:var(--muted);font-size:10px;border-top:1px solid var(--border);}
+.demo-badge{display:inline-block;background:var(--yel-bg);border:1px solid var(--yel-bd);color:var(--yellow);padding:3px 10px;border-radius:4px;font-size:10px;font-weight:700;letter-spacing:.8px;}
+
+::-webkit-scrollbar{width:5px;height:5px;}
+::-webkit-scrollbar-track{background:var(--surface2);}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px;}
+::-webkit-scrollbar-thumb:hover{background:var(--muted);}
+@media(max-width:700px){.stats-bar{grid-template-columns:repeat(3,1fr);}.pos-grid{grid-template-columns:repeat(3,1fr);}}
 </style>
 </head>
 <body>
 
-<!-- HEADER -->
+<!-- ══════════════════════════════════════
+     API KEY BAR
+══════════════════════════════════════ -->
+<div class="topbar">
+  <span class="topbar-title">🔑 OKX API Config</span>
+  <div class="api-row" id="api-form-row">
+    <div class="api-field">
+      <label>API Key</label>
+      <input class="api-input" type="password" id="api-key" placeholder="API Key...">
+      <span class="api-masked" id="api-key-masked">—</span>
+    </div>
+    <div class="api-field">
+      <label>Secret</label>
+      <input class="api-input" type="password" id="api-secret" placeholder="Secret Key...">
+      <span class="api-masked" id="api-secret-masked">—</span>
+    </div>
+    <div class="api-field">
+      <label>Passphrase</label>
+      <input class="api-input" type="password" id="api-pass" placeholder="Passphrase...">
+      <span class="api-masked" id="api-pass-masked">—</span>
+    </div>
+    <button class="btn-api-save" onclick="saveAPI()">💾 Save API</button>
+    <button class="btn-api-edit" id="btn-api-edit" onclick="editAPI()">✎ Edit</button>
+    <span class="api-status unset" id="api-status">● Not configured</span>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════
+     HEADER
+══════════════════════════════════════ -->
 <div class="header">
   <div>
-    <h1>⚡ CRYPTO ARB SCANNER</h1>
-    <p>Binance vs OKX · Real-time spread monitor · Simulation mode</p>
+    <h1>⚡ Crypto Arb Scanner <span>|</span> Binance vs OKX</h1>
+    <p>Real-time spread monitor · Simulation mode · Data from public APIs, no key required</p>
   </div>
   <div class="ws-badges">
     <div class="badge"><div class="dot connecting" id="dot-bnb"></div><span id="lbl-bnb">Binance WS</span></div>
     <div class="badge"><div class="dot connecting" id="dot-okx"></div><span id="lbl-okx">OKX WS</span></div>
-    <div class="badge"><div class="dot" id="dot-scan" style="background:var(--purple)"></div><span id="lbl-scan">Scanner idle</span></div>
+    <div class="badge"><div class="dot" id="dot-scan" style="background:#cbd5e1"></div><span id="lbl-scan">Scanner idle</span></div>
   </div>
 </div>
 
-<!-- STATS BAR -->
+<!-- ══════════════════════════════════════
+     STATS BAR
+══════════════════════════════════════ -->
 <div class="stats-bar">
-  <div class="stat"><div class="stat-val blue" id="stat-coins">0</div><div class="stat-lbl">Coins Matched</div></div>
-  <div class="stat"><div class="stat-val green" id="stat-opps">0</div><div class="stat-lbl">Opportunities</div></div>
-  <div class="stat"><div class="stat-val yellow" id="stat-best">—</div><div class="stat-lbl">Best Spread</div></div>
-  <div class="stat"><div class="stat-val purple" id="stat-balance">$10,000</div><div class="stat-lbl">Sim Balance</div></div>
+  <div class="stat"><div class="stat-val c-blue" id="stat-coins">0</div><div class="stat-lbl">Coins Matched</div></div>
+  <div class="stat"><div class="stat-val c-green" id="stat-opps">0</div><div class="stat-lbl">Opportunities</div></div>
+  <div class="stat"><div class="stat-val c-yellow" id="stat-best">—</div><div class="stat-lbl">Best Spread</div></div>
+  <div class="stat"><div class="stat-val c-purple" id="stat-balance">$10,000</div><div class="stat-lbl">Sim Balance</div></div>
   <div class="stat"><div class="stat-val" id="stat-pnl">$0.00</div><div class="stat-lbl">Total P&amp;L</div></div>
   <div class="stat"><div class="stat-val" id="stat-winrate">—</div><div class="stat-lbl">Win Rate</div></div>
 </div>
 
-<!-- SCANNER CONTROLS -->
-<div class="controls">
-  <span class="ctrl-label">Min Spread:</span>
-  <input type="range" id="min-spread" min="0.1" max="2" step="0.05" value="0.3">
-  <span class="spread-val" id="spread-display">0.30%</span>
-  <span class="ctrl-label" style="margin-left:8px">Search:</span>
-  <input type="text" id="search" placeholder="BTC, ETH...">
-  <span class="ctrl-label" style="margin-left:8px">Sort:</span>
-  <select id="sort-by">
-    <option value="spread">Spread %</option>
-    <option value="volume">Volume</option>
-    <option value="symbol">Symbol</option>
-  </select>
-  <span class="ctrl-label" style="margin-left:8px">Show:</span>
-  <select id="show-rows">
-    <option value="20">Top 20</option>
-    <option value="50">Top 50</option>
-    <option value="100">Top 100</option>
-    <option value="0">All</option>
-  </select>
+<div class="page">
+
+<!-- ══════════════════════════════════════
+     SCANNER CONTROLS
+══════════════════════════════════════ -->
+<div class="section-divider">🔍 Scanner Controls</div>
+<div class="card">
+  <div class="ctrl-grid">
+    <div class="ctrl-group">
+      <span class="ctrl-label">Min Spread</span>
+      <input type="range" id="min-spread" min="0.1" max="2" step="0.05" value="0.3">
+      <span class="spread-val" id="spread-display">0.30%</span>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">Search</span>
+      <input type="text" id="search" placeholder="BTC, ETH, SOL...">
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">Sort by</span>
+      <select id="sort-by">
+        <option value="spread">Spread %</option>
+        <option value="volume">Volume</option>
+        <option value="symbol">Symbol</option>
+      </select>
+    </div>
+    <div class="ctrl-group">
+      <span class="ctrl-label">Show rows</span>
+      <select id="show-rows">
+        <option value="20">Top 20</option>
+        <option value="50">Top 50</option>
+        <option value="100">Top 100</option>
+        <option value="0">All</option>
+      </select>
+    </div>
+  </div>
 </div>
 
-<!-- TRADE CONFIG -->
-<div class="trade-config">
-  <span class="tc-title">🎮 Sim Config:</span>
-  <span class="ctrl-label">Size (USDT):</span>
-  <input type="number" id="tc-size" value="100" min="10" max="10000" step="10">
-  <span class="ctrl-label">Leverage:</span>
-  <select id="tc-lev">
-    <option value="1">1x</option>
-    <option value="2">2x</option>
-    <option value="3" selected>3x</option>
-    <option value="5">5x</option>
-    <option value="10">10x</option>
-  </select>
-  <span class="ctrl-label">TP %:</span>
-  <input type="number" id="tc-tp" value="0.4" min="0.1" max="10" step="0.1">
-  <span class="ctrl-label">SL %:</span>
-  <input type="number" id="tc-sl" value="0.2" min="0.1" max="10" step="0.1">
-  <span class="ctrl-label">Auto-Trade:</span>
-  <select id="tc-auto">
-    <option value="0">Off</option>
-    <option value="0.5">Spread > 0.5%</option>
-    <option value="0.8">Spread > 0.8%</option>
-    <option value="1.0">Spread > 1.0%</option>
-  </select>
-  <button onclick="resetSim()" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:var(--red);padding:4px 10px;border-radius:5px;cursor:pointer;font-family:inherit;font-size:11px;">↺ Reset Sim</button>
+<!-- ══════════════════════════════════════
+     SIM CONFIG
+══════════════════════════════════════ -->
+<div class="section-divider">🎮 Simulation Config</div>
+<div class="card">
+  <div class="sim-config-grid">
+    <div class="sim-group">
+      <span class="sim-label">Size (USDT)</span>
+      <input type="number" id="tc-size" value="100" min="10" max="100000" step="10">
+    </div>
+    <div class="sim-group">
+      <span class="sim-label">Leverage</span>
+      <select id="tc-lev">
+        <option value="5">5x</option>
+        <option value="10" selected>10x</option>
+        <option value="20">20x</option>
+        <option value="30">30x</option>
+        <option value="50">50x</option>
+        <option value="100">100x</option>
+      </select>
+    </div>
+    <div class="sim-group">
+      <span class="sim-label">TP %</span>
+      <input type="number" id="tc-tp" value="0.4" min="0.05" max="10" step="0.05">
+    </div>
+    <div class="sim-group">
+      <span class="sim-label">SL %</span>
+      <input type="number" id="tc-sl" value="0.2" min="0.05" max="10" step="0.05">
+    </div>
+    <div class="sim-group">
+      <span class="sim-label">Auto-Trade</span>
+      <select id="tc-auto">
+        <option value="0">Off</option>
+        <option value="0.3">Spread &gt; 0.3%</option>
+        <option value="0.5">Spread &gt; 0.5%</option>
+        <option value="0.8">Spread &gt; 0.8%</option>
+        <option value="1.0">Spread &gt; 1.0%</option>
+      </select>
+    </div>
+    <button class="btn-reset" onclick="resetSim()">↺ Reset Sim</button>
+  </div>
 </div>
 
-<!-- OPEN POSITIONS -->
-<div class="section">
-  <div class="section-title">📊 Open Positions <span id="pos-count">(0)</span></div>
-  <div class="pos-summary">
-    <div class="pos-stat"><div class="pos-stat-val green" id="ps-open">0</div><div class="pos-stat-lbl">Open</div></div>
-    <div class="pos-stat"><div class="pos-stat-val green" id="ps-wins">0</div><div class="pos-stat-lbl">Wins</div></div>
-    <div class="pos-stat"><div class="pos-stat-val red" id="ps-losses">0</div><div class="pos-stat-lbl">Losses</div></div>
+<!-- ══════════════════════════════════════
+     OPEN POSITIONS
+══════════════════════════════════════ -->
+<div class="section-divider">📊 Open Positions <span id="pos-count" style="color:var(--blue);font-weight:800">(0)</span></div>
+<div class="card">
+  <div class="pos-grid" style="border-bottom:1px solid var(--border);">
+    <div class="pos-stat"><div class="pos-stat-val c-blue" id="ps-open">0</div><div class="pos-stat-lbl">Open</div></div>
+    <div class="pos-stat"><div class="pos-stat-val c-green" id="ps-wins">0</div><div class="pos-stat-lbl">Wins</div></div>
+    <div class="pos-stat"><div class="pos-stat-val c-red" id="ps-losses">0</div><div class="pos-stat-lbl">Losses</div></div>
     <div class="pos-stat"><div class="pos-stat-val" id="ps-unrealized">$0.00</div><div class="pos-stat-lbl">Unrealized P&L</div></div>
     <div class="pos-stat"><div class="pos-stat-val" id="ps-realized">$0.00</div><div class="pos-stat-lbl">Realized P&L</div></div>
   </div>
   <div class="table-wrap">
     <table>
-      <thead>
-        <tr>
-          <th>Symbol</th>
-          <th>Side</th>
-          <th>Entry</th>
-          <th>Current</th>
-          <th>TP</th>
-          <th>SL</th>
-          <th>Size</th>
-          <th>Lev</th>
-          <th>P&amp;L</th>
-          <th>P&amp;L %</th>
-          <th>Duration</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody id="pos-body">
-        <tr><td colspan="12" class="empty">No open positions — click SIM TRADE to start</td></tr>
-      </tbody>
+      <thead><tr>
+        <th>Symbol</th><th>Side</th><th>Entry</th><th>Current</th>
+        <th>TP</th><th>SL</th><th>Size</th><th>Lev</th>
+        <th>P&amp;L</th><th>P&amp;L %</th><th>Duration</th><th>Action</th>
+      </tr></thead>
+      <tbody id="pos-body"><tr><td colspan="12" class="empty">No open positions — click LONG / SHORT to start</td></tr></tbody>
     </table>
   </div>
 </div>
 
-<!-- OPPORTUNITIES -->
-<div class="section">
-  <div class="section-title">🔥 Top Opportunities <span id="opp-count">(0)</span></div>
+<!-- ══════════════════════════════════════
+     OPPORTUNITIES
+══════════════════════════════════════ -->
+<div class="section-divider">🔥 Top Opportunities <span id="opp-count" style="color:var(--green);font-weight:800">(0)</span></div>
+<div class="card">
   <div class="table-wrap">
     <table>
-      <thead>
-        <tr>
-          <th>Symbol</th>
-          <th>Binance</th>
-          <th>OKX</th>
-          <th>Spread</th>
-          <th>Signal</th>
-          <th>Strength</th>
-          <th>Volume 24h</th>
-          <th>Updated</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody id="opp-body">
-        <tr><td colspan="9" class="empty"><span class="loader"></span>Connecting to exchanges...</td></tr>
-      </tbody>
+      <thead><tr>
+        <th>Symbol</th><th>Binance</th><th>OKX</th><th>Spread</th>
+        <th>Signal</th><th>Strength</th><th>Volume 24h</th><th>Updated</th><th>Action</th>
+      </tr></thead>
+      <tbody id="opp-body"><tr><td colspan="9" class="empty"><span class="loader"></span>Connecting to exchanges...</td></tr></tbody>
     </table>
   </div>
 </div>
 
-<!-- TRADE HISTORY -->
-<div class="section">
-  <div class="section-title">📜 Trade History <span id="hist-count">(0)</span></div>
+<!-- ══════════════════════════════════════
+     TRADE HISTORY
+══════════════════════════════════════ -->
+<div class="section-divider">📜 Trade History <span id="hist-count" style="color:var(--muted)">(0)</span></div>
+<div class="card">
   <div class="table-wrap">
     <table>
-      <thead>
-        <tr>
-          <th>Symbol</th>
-          <th>Side</th>
-          <th>Entry</th>
-          <th>Exit</th>
-          <th>Size</th>
-          <th>Lev</th>
-          <th>P&amp;L</th>
-          <th>P&amp;L %</th>
-          <th>Result</th>
-          <th>Duration</th>
-          <th>Reason</th>
-        </tr>
-      </thead>
-      <tbody id="hist-body">
-        <tr><td colspan="11" class="empty">No closed trades yet</td></tr>
-      </tbody>
+      <thead><tr>
+        <th>Symbol</th><th>Side</th><th>Entry</th><th>Exit</th>
+        <th>Size</th><th>Lev</th><th>P&amp;L</th><th>P&amp;L %</th>
+        <th>Result</th><th>Duration</th><th>Reason</th>
+      </tr></thead>
+      <tbody id="hist-body"><tr><td colspan="11" class="empty">No closed trades yet</td></tr></tbody>
     </table>
   </div>
 </div>
 
-<!-- ALL COINS -->
-<div class="section">
-  <div class="section-title">📋 All Monitored Coins <span id="all-count">(0)</span></div>
+<!-- ══════════════════════════════════════
+     ALL COINS
+══════════════════════════════════════ -->
+<div class="section-divider">📋 All Monitored Coins <span id="all-count" style="color:var(--muted)">(0)</span></div>
+<div class="card">
   <div class="table-wrap">
     <table>
-      <thead>
-        <tr>
-          <th>Symbol</th>
-          <th>Binance</th>
-          <th>OKX</th>
-          <th>Spread</th>
-          <th>Signal</th>
-          <th>Volume 24h</th>
-          <th>Updated</th>
-        </tr>
-      </thead>
-      <tbody id="all-body">
-        <tr><td colspan="7" class="empty"><span class="loader"></span>Waiting for data...</td></tr>
-      </tbody>
+      <thead><tr>
+        <th>Symbol</th><th>Binance</th><th>OKX</th><th>Spread</th>
+        <th>Signal</th><th>Volume 24h</th><th>Updated</th>
+      </tr></thead>
+      <tbody id="all-body"><tr><td colspan="7" class="empty"><span class="loader"></span>Waiting for data...</td></tr></tbody>
     </table>
   </div>
 </div>
 
-<!-- LOG -->
-<div class="section">
-  <div class="section-title">📡 Event Log</div>
+<!-- ══════════════════════════════════════
+     EVENT LOG
+══════════════════════════════════════ -->
+<div class="section-divider">📡 Event Log</div>
+<div class="card" style="margin-bottom:0">
   <div class="log-box" id="log-box"></div>
 </div>
 
+</div><!-- /page -->
+
 <div class="footer">
-  <div class="demo-badge">⚠ SIMULATION ONLY — NO REAL TRADING — NO REAL MONEY</div><br>
-  Data: Binance &amp; OKX public APIs · No API key required · Prices may have latency · Not financial advice.
+  <div class="demo-badge">⚠ SIMULATION ONLY — NO REAL TRADING — NO REAL MONEY INVOLVED</div><br>
+  <span>Data: Binance &amp; OKX public WebSocket APIs · No API key required for data · Prices may have latency · Not financial advice.</span>
 </div>
 
 <script>
 // ═══════════════════════════════════════════════
+//  API KEY MANAGEMENT
+// ═══════════════════════════════════════════════
+const apiCreds = { key:'', secret:'', pass:'' };
+
+function saveAPI(){
+  const k=document.getElementById('api-key').value.trim();
+  const s=document.getElementById('api-secret').value.trim();
+  const p=document.getElementById('api-pass').value.trim();
+  if(!k||!s||!p){alert('Vui lòng nhập đủ API Key, Secret và Passphrase!');return;}
+  apiCreds.key=k; apiCreds.secret=s; apiCreds.pass=p;
+
+  // Mask: show first 3 chars + ****
+  const mask = v => v.slice(0,3)+'·'.repeat(Math.min(v.length-3,12))+'***';
+  document.getElementById('api-key').style.display='none';
+  document.getElementById('api-secret').style.display='none';
+  document.getElementById('api-pass').style.display='none';
+  document.getElementById('api-key-masked').textContent=mask(k);
+  document.getElementById('api-secret-masked').textContent=mask(s);
+  document.getElementById('api-pass-masked').textContent=mask(p);
+  ['api-key-masked','api-secret-masked','api-pass-masked'].forEach(id=>document.getElementById(id).style.display='inline-block');
+  document.querySelector('.btn-api-save').style.display='none';
+  document.getElementById('btn-api-edit').style.display='inline-block';
+  document.getElementById('api-status').textContent='● API Set';
+  document.getElementById('api-status').className='api-status set';
+  log('OKX API configured ✓ (simulation mode — not connected to live trading)','g');
+}
+
+function editAPI(){
+  apiCreds.key=''; apiCreds.secret=''; apiCreds.pass='';
+  document.getElementById('api-key').value='';
+  document.getElementById('api-secret').value='';
+  document.getElementById('api-pass').value='';
+  ['api-key','api-secret','api-pass'].forEach(id=>{document.getElementById(id).style.display='inline-block';});
+  ['api-key-masked','api-secret-masked','api-pass-masked'].forEach(id=>{document.getElementById(id).style.display='none';});
+  document.querySelector('.btn-api-save').style.display='inline-block';
+  document.getElementById('btn-api-edit').style.display='none';
+  document.getElementById('api-status').textContent='● Not configured';
+  document.getElementById('api-status').className='api-status unset';
+}
+
+// ═══════════════════════════════════════════════
 //  STATE
 // ═══════════════════════════════════════════════
 const state = {
-  binance: {},
-  okx:     {},
-  config: { minSpread:0.30, sortBy:'spread', showRows:20, search:'', minVolume:500_000 },
-  stats:  { updates:0, lastSecTs:Date.now() },
-  bnbReady:false, okxReady:false, scanStarted:false,
+  binance:{}, okx:{},
+  config:{minSpread:0.30,sortBy:'spread',showRows:20,search:'',minVolume:500_000},
+  stats:{updates:0,lastSecTs:Date.now()},
+  bnbReady:false,okxReady:false,scanStarted:false,
 };
-
-// Simulation state
 const sim = {
-  balance:    10000,
-  positions:  {},   // id → position object
-  history:    [],
-  wins:       0,
-  losses:     0,
-  realized:   0,
-  nextId:     1,
-  autoTraded: {},   // symbol → ts, prevent spam
+  balance:10000,positions:{},history:[],
+  wins:0,losses:0,realized:0,nextId:1,autoTraded:{},
 };
 
 // ═══════════════════════════════════════════════
 //  LOGGING
 // ═══════════════════════════════════════════════
-function log(msg, type='') {
-  const box = document.getElementById('log-box');
-  const t   = new Date().toTimeString().slice(0,8);
-  const cls = {g:'g',r:'r',y:'y'}[type]||'';
-  const d   = document.createElement('div');
-  d.className = 'log-line';
-  d.innerHTML = `<span class="t">[${t}]</span><span class="${cls}">${msg}</span>`;
+function log(msg,type=''){
+  const box=document.getElementById('log-box');
+  const t=new Date().toTimeString().slice(0,8);
+  const cls={g:'log-g',r:'log-r',y:'log-y'}[type]||'';
+  const d=document.createElement('div');
+  d.className='log-line';
+  d.innerHTML=`<span class="log-t">[${t}]</span><span class="${cls}">${msg}</span>`;
   box.prepend(d);
-  while(box.children.length>60) box.removeChild(box.lastChild);
+  while(box.children.length>60)box.removeChild(box.lastChild);
 }
-
 function setStatus(id,status,label){
   const dot=document.getElementById(`dot-${id}`);
   const lbl=document.getElementById(`lbl-${id}`);
@@ -399,17 +496,17 @@ function setStatus(id,status,label){
 // ═══════════════════════════════════════════════
 function connectBinance(){
   log('Connecting to Binance WebSocket...');
-  setStatus('bnb','connecting','Binance WS...');
-  const ws = new WebSocket('wss://stream.binance.com:9443/ws/!miniTicker@arr');
+  setStatus('bnb','connecting','Binance...');
+  const ws=new WebSocket('wss://stream.binance.com:9443/ws/!miniTicker@arr');
   let pi;
-  ws.onopen = ()=>{
+  ws.onopen=()=>{
     log('Binance WS connected ✓','g');
     setStatus('bnb','connected','Binance ✓');
     state.bnbReady=true;
     pi=setInterval(()=>ws.readyState===1&&ws.send(JSON.stringify({method:'ping'})),30000);
     maybeStart();
   };
-  ws.onmessage = e=>{
+  ws.onmessage=e=>{
     try{
       const tickers=JSON.parse(e.data);
       if(!Array.isArray(tickers))return;
@@ -424,7 +521,6 @@ function connectBinance(){
   ws.onclose=()=>{
     clearInterval(pi);state.bnbReady=false;
     setStatus('bnb','connecting','Binance reconnecting...');
-    log('Binance WS closed — reconnecting...','r');
     setTimeout(connectBinance,5000);
   };
 }
@@ -435,7 +531,7 @@ function connectBinance(){
 let okxWs=null;
 function connectOKX(){
   log('Connecting to OKX WebSocket...');
-  setStatus('okx','connecting','OKX WS...');
+  setStatus('okx','connecting','OKX...');
   okxWs=new WebSocket('wss://ws.okx.com:8443/ws/v5/public');
   let pi;
   okxWs.onopen=()=>{
@@ -462,11 +558,9 @@ function connectOKX(){
   okxWs.onclose=()=>{
     clearInterval(pi);state.okxReady=false;
     setStatus('okx','connecting','OKX reconnecting...');
-    log('OKX WS closed — reconnecting...','r');
     setTimeout(connectOKX,5000);
   };
 }
-
 function subscribeOKX(){
   if(!okxWs||okxWs.readyState!==1)return;
   const coins=Object.entries(state.binance)
@@ -491,7 +585,9 @@ function maybeStart(){
   log('Scanner started ✓','g');
   setStatus('scan','connected','Scanner ✓');
   const d=document.getElementById('dot-scan');
-  d.style.animation='pulse 2s infinite';d.style.background='var(--green)';
+  d.style.animation='pulse 2s infinite';
+  d.style.background='var(--green)';
+  d.style.boxShadow='0 0 0 3px var(--green-bg)';
   setInterval(runScan,500);
 }
 
@@ -507,20 +603,22 @@ function runScan(){
     if(bnData.vol<cfg.minVolume)continue;
     const spread=(okxData.price-bnData.price)/bnData.price*100;
     results.push({
-      symbol:okxSym,bnSym,
-      bnPrice:bnData.price,okxPrice:okxData.price,
-      spread,absSpread:Math.abs(spread),
-      vol:bnData.vol,ts:Math.max(bnData.ts,okxData.ts),
+      symbol:okxSym,bnSym,bnPrice:bnData.price,okxPrice:okxData.price,
+      spread,absSpread:Math.abs(spread),vol:bnData.vol,
+      ts:Math.max(bnData.ts,okxData.ts),
       direction:spread<-0.001?'LONG':spread>0.001?'SHORT':'NEU',
     });
   }
-  const sortFn={spread:(a,b)=>b.absSpread-a.absSpread,volume:(a,b)=>b.vol-a.vol,symbol:(a,b)=>a.symbol.localeCompare(b.symbol)}[cfg.sortBy]||((a,b)=>b.absSpread-a.absSpread);
+  const sortFn={
+    spread:(a,b)=>b.absSpread-a.absSpread,
+    volume:(a,b)=>b.vol-a.vol,
+    symbol:(a,b)=>a.symbol.localeCompare(b.symbol),
+  }[cfg.sortBy]||((a,b)=>b.absSpread-a.absSpread);
   results.sort(sortFn);
   const search=cfg.search.toUpperCase();
   const filtered=search?results.filter(r=>r.symbol.includes(search)):results;
   const opps=filtered.filter(r=>r.absSpread>=cfg.minSpread);
 
-  // Update positions with current prices
   updatePositions(results);
 
   // Auto-trade
@@ -529,14 +627,13 @@ function runScan(){
     const top=opps[0];
     if(top&&top.absSpread>=autoThresh&&top.direction!=='NEU'){
       const lastAuto=sim.autoTraded[top.symbol]||0;
-      if(now-lastAuto>30000&&!sim.positions[`auto_${top.symbol}`]){
+      if(now-lastAuto>30000&&!Object.values(sim.positions).find(p=>p.symbol===top.symbol)){
         sim.autoTraded[top.symbol]=now;
         openTrade(top,'AUTO');
       }
     }
   }
 
-  // Stats
   document.getElementById('stat-coins').textContent=results.length;
   document.getElementById('stat-opps').textContent=opps.length;
   document.getElementById('opp-count').textContent=`(${opps.length})`;
@@ -544,112 +641,76 @@ function runScan(){
   const best=opps[0];
   document.getElementById('stat-best').textContent=best?`${best.symbol.replace('-USDT','')} ${best.spread>0?'+':''}${best.spread.toFixed(3)}%`:'—';
 
-  // Render
   renderOpps(opps,cfg.showRows);
   renderAll(filtered,cfg.showRows);
   renderPositions();
   renderHistory();
   updateSimStats();
 
-  // Updates/sec
   const el=(Date.now()-state.stats.lastSecTs)/1000;
-  if(el>=1){
-    document.getElementById('stat-updates')&&(document.getElementById('stat-updates').textContent=Math.round(state.stats.updates/el));
-    state.stats.updates=0;state.stats.lastSecTs=Date.now();
-  }
+  if(el>=1){state.stats.updates=0;state.stats.lastSecTs=Date.now();}
 }
 
 // ═══════════════════════════════════════════════
-//  SIMULATION — OPEN TRADE
+//  SIM — OPEN
 // ═══════════════════════════════════════════════
-function openTrade(row, source='MANUAL'){
-  const size    = parseFloat(document.getElementById('tc-size').value)||100;
-  const lev     = parseInt(document.getElementById('tc-lev').value)||3;
-  const tpPct   = parseFloat(document.getElementById('tc-tp').value)||0.4;
-  const slPct   = parseFloat(document.getElementById('tc-sl').value)||0.2;
-  const dir     = row.direction;
-  if(dir==='NEU'){log(`${row.symbol}: No clear direction, skipping`,'y');return;}
-
-  const entryPrice = row.okxPrice;
-  const notional   = size * lev;
-  const qty        = notional / entryPrice;
-  const tp  = dir==='LONG' ? entryPrice*(1+tpPct/100)   : entryPrice*(1-tpPct/100);
-  const sl  = dir==='LONG' ? entryPrice*(1-slPct/100)   : entryPrice*(1+slPct/100);
-
-  const id = `${row.symbol}_${sim.nextId++}`;
-  sim.positions[id]={
-    id,symbol:row.symbol,dir,
-    entryPrice,currentPrice:entryPrice,
-    tp,sl,size,lev,qty,notional,
-    openTs:Date.now(),source,
-    bnEntryPrice:row.bnPrice,
-    entrySpread:row.spread,
-  };
-
-  sim.balance -= size; // margin used
-  log(`[${source}] ${dir} ${row.symbol} @ ${fmtPrice(entryPrice)} | TP:${fmtPrice(tp)} SL:${fmtPrice(sl)} Lev:${lev}x`,'g');
+function openTrade(row,source='MANUAL'){
+  const size=parseFloat(document.getElementById('tc-size').value)||100;
+  const lev=parseInt(document.getElementById('tc-lev').value)||10;
+  const tpPct=parseFloat(document.getElementById('tc-tp').value)||0.4;
+  const slPct=parseFloat(document.getElementById('tc-sl').value)||0.2;
+  const dir=row.direction;
+  if(dir==='NEU'){log(`${row.symbol}: No clear direction`,'y');return;}
+  const entry=row.okxPrice;
+  const notional=size*lev;
+  const qty=notional/entry;
+  const tp=dir==='LONG'?entry*(1+tpPct/100):entry*(1-tpPct/100);
+  const sl=dir==='LONG'?entry*(1-slPct/100):entry*(1+slPct/100);
+  const id=`${row.symbol}_${sim.nextId++}`;
+  sim.positions[id]={id,symbol:row.symbol,dir,entry,currentPrice:entry,tp,sl,size,lev,qty,notional,openTs:Date.now(),source};
+  sim.balance-=size;
+  log(`[${source}] ${dir} ${row.symbol} @ ${fmtPrice(entry)} | TP:${fmtPrice(tp)} | SL:${fmtPrice(sl)} | ${lev}x`,'g');
 }
 
 // ═══════════════════════════════════════════════
-//  SIMULATION — UPDATE POSITIONS
+//  SIM — UPDATE
 // ═══════════════════════════════════════════════
 function updatePositions(results){
-  const priceMap={};
-  results.forEach(r=>priceMap[r.symbol]=r.okxPrice);
-
+  const pm={};results.forEach(r=>pm[r.symbol]=r.okxPrice);
   for(const[id,pos]of Object.entries(sim.positions)){
-    const cur=priceMap[pos.symbol]||state.okx[pos.symbol]?.price;
+    const cur=pm[pos.symbol]||state.okx[pos.symbol]?.price;
     if(!cur)continue;
     pos.currentPrice=cur;
-
-    // Check TP/SL
-    const hit_tp = pos.dir==='LONG' ? cur>=pos.tp : cur<=pos.tp;
-    const hit_sl = pos.dir==='LONG' ? cur<=pos.sl : cur>=pos.sl;
-
-    if(hit_tp) closeTrade(id,'TP HIT ✓');
-    else if(hit_sl) closeTrade(id,'SL HIT ✗');
+    const tp=pos.dir==='LONG'?cur>=pos.tp:cur<=pos.tp;
+    const sl=pos.dir==='LONG'?cur<=pos.sl:cur>=pos.sl;
+    if(tp)closeTrade(id,'TP HIT ✓');
+    else if(sl)closeTrade(id,'SL HIT ✗');
   }
 }
 
 // ═══════════════════════════════════════════════
-//  SIMULATION — CLOSE TRADE
+//  SIM — CLOSE
 // ═══════════════════════════════════════════════
-function closeTrade(id, reason='MANUAL'){
+function closeTrade(id,reason='MANUAL'){
   const pos=sim.positions[id];
   if(!pos)return;
-
-  const exitPrice=pos.currentPrice;
-  const rawPnl   = pos.dir==='LONG'
-    ? (exitPrice-pos.entryPrice)*pos.qty
-    : (pos.entryPrice-exitPrice)*pos.qty;
-  const feePct   = 0.001; // 0.1% per side
-  const fees     = pos.notional*feePct*2;
-  const netPnl   = rawPnl - fees;
-  const pnlPct   = (netPnl/pos.size)*100;
-  const dur      = Math.round((Date.now()-pos.openTs)/1000);
-  const won      = netPnl>0;
-
-  sim.balance  += pos.size + netPnl;
-  sim.realized += netPnl;
-  if(won) sim.wins++; else sim.losses++;
-
-  sim.history.unshift({
-    symbol:pos.symbol, dir:pos.dir,
-    entryPrice:pos.entryPrice, exitPrice,
-    size:pos.size, lev:pos.lev,
-    netPnl, pnlPct, won, dur, reason,
-    ts:Date.now(),
-  });
-
+  const exit=pos.currentPrice;
+  const raw=pos.dir==='LONG'?(exit-pos.entry)*pos.qty:(pos.entry-exit)*pos.qty;
+  const fees=pos.notional*0.001*2;
+  const pnl=raw-fees;
+  const pnlPct=(pnl/pos.size)*100;
+  const dur=Math.round((Date.now()-pos.openTs)/1000);
+  const won=pnl>0;
+  sim.balance+=pos.size+pnl;
+  sim.realized+=pnl;
+  if(won)sim.wins++;else sim.losses++;
+  sim.history.unshift({symbol:pos.symbol,dir:pos.dir,entry:pos.entry,exit,size:pos.size,lev:pos.lev,pnl,pnlPct,won,dur,reason,ts:Date.now()});
   delete sim.positions[id];
-
-  const emoji=won?'✅':'❌';
-  const clr=won?'g':'r';
-  log(`${emoji} CLOSED ${pos.dir} ${pos.symbol} | P&L: ${netPnl>=0?'+':''}$${netPnl.toFixed(2)} (${pnlPct.toFixed(2)}%) | ${reason}`,clr);
+  log(`${won?'✅':'❌'} CLOSED ${pos.dir} ${pos.symbol} | P&L: ${pnl>=0?'+':''}$${pnl.toFixed(2)} (${pnlPct.toFixed(2)}%) | ${reason}`,won?'g':'r');
 }
 
 // ═══════════════════════════════════════════════
-//  RENDER OPPORTUNITIES
+//  RENDER — OPPORTUNITIES
 // ═══════════════════════════════════════════════
 function renderOpps(rows,limit){
   const tbody=document.getElementById('opp-body');
@@ -666,9 +727,9 @@ function renderOpps(rows,limit){
     const hot=r.absSpread>=state.config.minSpread?'hot':'';
     const [base]=r.symbol.split('-');
     const hasPos=Object.values(sim.positions).some(p=>p.symbol===r.symbol);
-    const btnCls=r.direction==='LONG'?'long-btn':'short-btn';
+    const disabled=hasPos||r.direction==='NEU';
+    const btnCls=r.direction==='LONG'?'btn-long':'btn-short';
     const btnTxt=r.direction==='LONG'?'▲ LONG':'▼ SHORT';
-    const btnDisabled=hasPos||r.direction==='NEU'?'disabled style="opacity:.4;cursor:not-allowed"':'';
     return `<tr class="${hot}">
       <td><span class="base">${base}</span><span class="quote">/USDT</span></td>
       <td>${fmtPrice(r.bnPrice)}</td>
@@ -678,15 +739,14 @@ function renderOpps(rows,limit){
       <td><div class="bar-wrap"><div class="bar-bg"><div class="bar-fill" style="width:${bw}%;background:${bc}"></div></div></div></td>
       <td class="age">$${formatVol(r.vol)}</td>
       <td class="age">${age}s</td>
-      <td><button class="btn-sim ${btnCls}" ${btnDisabled} onclick='simClick(${JSON.stringify(r)})'>${btnTxt}</button></td>
+      <td><button class="btn-sim ${btnCls}" ${disabled?'disabled':''} onclick='simClick(${JSON.stringify(r)})'>${btnTxt}</button></td>
     </tr>`;
   }).join('');
 }
-
 function simClick(r){openTrade(r,'MANUAL');}
 
 // ═══════════════════════════════════════════════
-//  RENDER POSITIONS
+//  RENDER — POSITIONS
 // ═══════════════════════════════════════════════
 function renderPositions(){
   const tbody=document.getElementById('pos-body');
@@ -695,40 +755,36 @@ function renderPositions(){
   document.getElementById('ps-open').textContent=pos.length;
   document.getElementById('ps-wins').textContent=sim.wins;
   document.getElementById('ps-losses').textContent=sim.losses;
-
-  let unrealized=0;
+  let unreal=0;
   pos.forEach(p=>{
-    const rawPnl=p.dir==='LONG'?(p.currentPrice-p.entryPrice)*p.qty:(p.entryPrice-p.currentPrice)*p.qty;
-    const fees=p.notional*0.001*2;
-    unrealized+=rawPnl-fees;
+    const raw=p.dir==='LONG'?(p.currentPrice-p.entry)*p.qty:(p.entry-p.currentPrice)*p.qty;
+    unreal+=raw-p.notional*0.002;
   });
-  document.getElementById('ps-unrealized').textContent=(unrealized>=0?'+':'')+'$'+unrealized.toFixed(2);
-  document.getElementById('ps-unrealized').className='pos-stat-val '+(unrealized>=0?'green':'red');
-  document.getElementById('ps-realized').textContent=(sim.realized>=0?'+':'')+'$'+sim.realized.toFixed(2);
-  document.getElementById('ps-realized').className='pos-stat-val '+(sim.realized>=0?'green':'red');
-
+  const uel=document.getElementById('ps-unrealized');
+  uel.textContent=(unreal>=0?'+':'')+'$'+unreal.toFixed(2);
+  uel.className='pos-stat-val '+(unreal>=0?'c-green':'c-red');
+  const rel=document.getElementById('ps-realized');
+  rel.textContent=(sim.realized>=0?'+':'')+'$'+sim.realized.toFixed(2);
+  rel.className='pos-stat-val '+(sim.realized>=0?'c-green':'c-red');
   if(!pos.length){tbody.innerHTML=`<tr><td colspan="12" class="empty">No open positions</td></tr>`;return;}
   const now=Date.now();
   tbody.innerHTML=pos.map(p=>{
-    const rawPnl=p.dir==='LONG'?(p.currentPrice-p.entryPrice)*p.qty:(p.entryPrice-p.currentPrice)*p.qty;
-    const fees=p.notional*0.001*2;
-    const pnl=rawPnl-fees;
+    const raw=p.dir==='LONG'?(p.currentPrice-p.entry)*p.qty:(p.entry-p.currentPrice)*p.qty;
+    const pnl=raw-p.notional*0.002;
     const pnlPct=(pnl/p.size)*100;
     const dur=Math.round((now-p.openTs)/1000);
     const pCls=pnl>0?'pnl-pos':pnl<0?'pnl-neg':'pnl-neu';
     const sigCls=p.dir==='LONG'?'long':'short';
     const durStr=dur>=60?`${Math.floor(dur/60)}m${dur%60}s`:`${dur}s`;
-    const tpPct=Math.abs((p.tp-p.entryPrice)/p.entryPrice*100).toFixed(2);
-    const slPct=Math.abs((p.sl-p.entryPrice)/p.entryPrice*100).toFixed(2);
     return `<tr class="pos-open">
       <td><span class="base">${p.symbol.replace('-USDT','')}</span><span class="quote">/USDT</span></td>
       <td><span class="signal ${sigCls}">${p.dir}</span></td>
-      <td>${fmtPrice(p.entryPrice)}</td>
+      <td>${fmtPrice(p.entry)}</td>
       <td>${fmtPrice(p.currentPrice)}</td>
-      <td style="color:var(--green);font-size:10px">${fmtPrice(p.tp)} <span style="color:var(--muted)">(+${tpPct}%)</span></td>
-      <td style="color:var(--red);font-size:10px">${fmtPrice(p.sl)} <span style="color:var(--muted)">(-${slPct}%)</span></td>
+      <td style="color:var(--green);font-size:11px">${fmtPrice(p.tp)}</td>
+      <td style="color:var(--red);font-size:11px">${fmtPrice(p.sl)}</td>
       <td>$${p.size}</td>
-      <td style="color:var(--purple)">${p.lev}x</td>
+      <td style="color:var(--purple);font-weight:700">${p.lev}x</td>
       <td class="${pCls}">${pnl>=0?'+':''}$${pnl.toFixed(2)}</td>
       <td class="${pCls}">${pnlPct>=0?'+':''}${pnlPct.toFixed(2)}%</td>
       <td class="age">${durStr}</td>
@@ -738,35 +794,35 @@ function renderPositions(){
 }
 
 // ═══════════════════════════════════════════════
-//  RENDER HISTORY
+//  RENDER — HISTORY
 // ═══════════════════════════════════════════════
 function renderHistory(){
   const tbody=document.getElementById('hist-body');
   document.getElementById('hist-count').textContent=`(${sim.history.length})`;
   if(!sim.history.length){tbody.innerHTML=`<tr><td colspan="11" class="empty">No closed trades yet</td></tr>`;return;}
-  tbody.innerHTML=sim.history.slice(0,30).map(t=>{
-    const pCls=t.netPnl>0?'pnl-pos':'pnl-neg';
-    const resCls=t.won?'green':'red';
+  tbody.innerHTML=sim.history.slice(0,40).map(t=>{
+    const pCls=t.pnl>0?'pnl-pos':'pnl-neg';
     const sigCls=t.dir==='LONG'?'long':'short';
     const dur=t.dur>=60?`${Math.floor(t.dur/60)}m${t.dur%60}s`:`${t.dur}s`;
+    const reason=t.reason.includes('TP')?'tag-tp':t.reason.includes('SL')?'tag-sl':t.reason==='AUTO'?'tag-auto':'tag-man';
     return `<tr>
       <td><span class="base">${t.symbol.replace('-USDT','')}</span><span class="quote">/USDT</span></td>
       <td><span class="signal ${sigCls}">${t.dir}</span></td>
-      <td>${fmtPrice(t.entryPrice)}</td>
-      <td>${fmtPrice(t.exitPrice)}</td>
+      <td>${fmtPrice(t.entry)}</td>
+      <td>${fmtPrice(t.exit)}</td>
       <td>$${t.size}</td>
-      <td style="color:var(--purple)">${t.lev}x</td>
-      <td class="${pCls}">${t.netPnl>=0?'+':''}$${t.netPnl.toFixed(2)}</td>
+      <td style="color:var(--purple);font-weight:700">${t.lev}x</td>
+      <td class="${pCls}">${t.pnl>=0?'+':''}$${t.pnl.toFixed(2)}</td>
       <td class="${pCls}">${t.pnlPct>=0?'+':''}${t.pnlPct.toFixed(2)}%</td>
-      <td class="${resCls} ">${t.won?'WIN':'LOSS'}</td>
+      <td><span class="tag ${t.won?'tag-win':'tag-loss'}">${t.won?'WIN':'LOSS'}</span></td>
       <td class="age">${dur}</td>
-      <td class="age">${t.reason}</td>
+      <td><span class="tag ${reason}">${t.reason}</span></td>
     </tr>`;
   }).join('');
 }
 
 // ═══════════════════════════════════════════════
-//  RENDER ALL COINS
+//  RENDER — ALL COINS
 // ═══════════════════════════════════════════════
 function renderAll(rows,limit){
   const tbody=document.getElementById('all-body');
@@ -779,7 +835,7 @@ function renderAll(rows,limit){
     const sStr=(r.spread>0?'+':'')+r.spread.toFixed(4)+'%';
     const sigCls=r.direction==='LONG'?'long':r.direction==='SHORT'?'short':'neu';
     const hot=r.absSpread>=state.config.minSpread?'hot':'';
-    const [base]=r.symbol.split('-');
+    const[base]=r.symbol.split('-');
     return `<tr class="${hot}">
       <td><span class="base">${base}</span><span class="quote">/USDT</span></td>
       <td>${fmtPrice(r.bnPrice)}</td>
@@ -798,21 +854,22 @@ function renderAll(rows,limit){
 function updateSimStats(){
   const total=sim.wins+sim.losses;
   const wr=total>0?((sim.wins/total)*100).toFixed(1)+'%':'—';
-  const totalPnl=sim.realized+Object.values(sim.positions).reduce((s,p)=>{
-    const rawPnl=p.dir==='LONG'?(p.currentPrice-p.entryPrice)*p.qty:(p.entryPrice-p.currentPrice)*p.qty;
-    return s+rawPnl-p.notional*0.002;
+  const unreal=Object.values(sim.positions).reduce((s,p)=>{
+    const raw=p.dir==='LONG'?(p.currentPrice-p.entry)*p.qty:(p.entry-p.currentPrice)*p.qty;
+    return s+raw-p.notional*0.002;
   },0);
+  const totalPnl=sim.realized+unreal;
   document.getElementById('stat-balance').textContent='$'+sim.balance.toFixed(2);
-  document.getElementById('stat-pnl').textContent=(totalPnl>=0?'+':'')+'$'+totalPnl.toFixed(2);
-  document.getElementById('stat-pnl').className='stat-val '+(totalPnl>=0?'green':'red');
-  document.getElementById('stat-winrate').textContent=wr;
-  document.getElementById('stat-winrate').className='stat-val '+(sim.wins>sim.losses?'green':sim.losses>sim.wins?'red':'');
+  const pe=document.getElementById('stat-pnl');
+  pe.textContent=(totalPnl>=0?'+':'')+'$'+totalPnl.toFixed(2);
+  pe.className='stat-val '+(totalPnl>=0?'c-green':'c-red');
+  const we=document.getElementById('stat-winrate');
+  we.textContent=wr;
+  we.className='stat-val '+(sim.wins>sim.losses?'c-green':sim.losses>sim.wins?'c-red':'');
 }
-
 function resetSim(){
   if(!confirm('Reset simulation? All positions and history will be cleared.'))return;
-  sim.balance=10000;sim.positions={};sim.history=[];
-  sim.wins=0;sim.losses=0;sim.realized=0;sim.nextId=1;sim.autoTraded={};
+  Object.assign(sim,{balance:10000,positions:{},history:[],wins:0,losses:0,realized:0,nextId:1,autoTraded:{}});
   log('Simulation reset ✓','y');
 }
 
@@ -820,17 +877,17 @@ function resetSim(){
 //  HELPERS
 // ═══════════════════════════════════════════════
 function fmtPrice(p){
-  if(!p||isNaN(p))return '—';
+  if(!p||isNaN(p))return'—';
   if(p>=1000)return p.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
   if(p>=1)return p.toFixed(4);
   if(p>=0.01)return p.toFixed(5);
   return p.toFixed(6);
 }
 function formatVol(v){
-  if(!v)return '—';
-  if(v>=1e9)return (v/1e9).toFixed(2)+'B';
-  if(v>=1e6)return (v/1e6).toFixed(2)+'M';
-  if(v>=1e3)return (v/1e3).toFixed(1)+'K';
+  if(!v)return'—';
+  if(v>=1e9)return(v/1e9).toFixed(2)+'B';
+  if(v>=1e6)return(v/1e6).toFixed(2)+'M';
+  if(v>=1e3)return(v/1e3).toFixed(1)+'K';
   return v.toFixed(0);
 }
 
