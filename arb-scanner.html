@@ -318,6 +318,7 @@ td:first-child{text-align:left;font-weight:600;color:var(--text);}
       <select id="tc-auto">
         <option value="0">Off</option>
         <option value="0.3">Spread &gt; 0.3%</option>
+        <option value="0.4">Spread &gt; 0.4%</option>
         <option value="0.5">Spread &gt; 0.5%</option>
         <option value="0.8">Spread &gt; 0.8%</option>
         <option value="1.0">Spread &gt; 1.0%</option>
@@ -376,10 +377,11 @@ td:first-child{text-align:left;font-weight:600;color:var(--text);}
     <table>
       <thead><tr>
         <th>Symbol</th><th>Side</th><th>Entry</th><th>Exit</th>
-        <th>Size</th><th>Lev</th><th>P&amp;L</th><th>P&amp;L %</th>
+        <th>Size</th><th>Lev</th><th>Fee Open</th><th>Fee Close</th><th>Total Fee</th>
+        <th>P&amp;L</th><th>P&amp;L %</th>
         <th>Result</th><th>Duration</th><th>Reason</th>
       </tr></thead>
-      <tbody id="hist-body"><tr><td colspan="11" class="empty">No closed trades yet</td></tr></tbody>
+      <tbody id="hist-body"><tr><td colspan="14" class="empty">No closed trades yet</td></tr></tbody>
     </table>
   </div>
 </div>
@@ -691,12 +693,16 @@ function updatePositions(results){
 // ═══════════════════════════════════════════════
 //  SIM — CLOSE
 // ═══════════════════════════════════════════════
+const FEE_RATE = 0.0005; // 0.05% per side (OKX futures taker fee)
+
 function closeTrade(id,reason='MANUAL'){
   const pos=sim.positions[id];
   if(!pos)return;
   const exit=pos.currentPrice;
   const raw=pos.dir==='LONG'?(exit-pos.entry)*pos.qty:(pos.entry-exit)*pos.qty;
-  const fees=pos.notional*0.001*2;
+  const feeOpen =pos.notional*FEE_RATE;
+  const feeClose=pos.notional*FEE_RATE;
+  const fees    =feeOpen+feeClose;
   const pnl=raw-fees;
   const pnlPct=(pnl/pos.size)*100;
   const dur=Math.round((Date.now()-pos.openTs)/1000);
@@ -704,7 +710,7 @@ function closeTrade(id,reason='MANUAL'){
   sim.balance+=pos.size+pnl;
   sim.realized+=pnl;
   if(won)sim.wins++;else sim.losses++;
-  sim.history.unshift({symbol:pos.symbol,dir:pos.dir,entry:pos.entry,exit,size:pos.size,lev:pos.lev,pnl,pnlPct,won,dur,reason,ts:Date.now()});
+  sim.history.unshift({symbol:pos.symbol,dir:pos.dir,entry:pos.entry,exit,size:pos.size,lev:pos.lev,feeOpen,feeClose,fees,pnl,pnlPct,won,dur,reason,ts:Date.now()});
   delete sim.positions[id];
   log(`${won?'✅':'❌'} CLOSED ${pos.dir} ${pos.symbol} | P&L: ${pnl>=0?'+':''}$${pnl.toFixed(2)} (${pnlPct.toFixed(2)}%) | ${reason}`,won?'g':'r');
 }
@@ -758,7 +764,7 @@ function renderPositions(){
   let unreal=0;
   pos.forEach(p=>{
     const raw=p.dir==='LONG'?(p.currentPrice-p.entry)*p.qty:(p.entry-p.currentPrice)*p.qty;
-    unreal+=raw-p.notional*0.002;
+    unreal+=raw-p.notional*FEE_RATE*2;
   });
   const uel=document.getElementById('ps-unrealized');
   uel.textContent=(unreal>=0?'+':'')+'$'+unreal.toFixed(2);
@@ -770,7 +776,7 @@ function renderPositions(){
   const now=Date.now();
   tbody.innerHTML=pos.map(p=>{
     const raw=p.dir==='LONG'?(p.currentPrice-p.entry)*p.qty:(p.entry-p.currentPrice)*p.qty;
-    const pnl=raw-p.notional*0.002;
+    const pnl=raw-p.notional*FEE_RATE*2;
     const pnlPct=(pnl/p.size)*100;
     const dur=Math.round((now-p.openTs)/1000);
     const pCls=pnl>0?'pnl-pos':pnl<0?'pnl-neg':'pnl-neu';
@@ -805,6 +811,9 @@ function renderHistory(){
     const sigCls=t.dir==='LONG'?'long':'short';
     const dur=t.dur>=60?`${Math.floor(t.dur/60)}m${t.dur%60}s`:`${t.dur}s`;
     const reason=t.reason.includes('TP')?'tag-tp':t.reason.includes('SL')?'tag-sl':t.reason==='AUTO'?'tag-auto':'tag-man';
+    const feeOpen =t.feeOpen!=null?t.feeOpen:(t.size*(t.lev||1)*FEE_RATE);
+    const feeClose=t.feeClose!=null?t.feeClose:(t.size*(t.lev||1)*FEE_RATE);
+    const feesTotal=feeOpen+feeClose;
     return `<tr>
       <td><span class="base">${t.symbol.replace('-USDT','')}</span><span class="quote">/USDT</span></td>
       <td><span class="signal ${sigCls}">${t.dir}</span></td>
@@ -812,6 +821,9 @@ function renderHistory(){
       <td>${fmtPrice(t.exit)}</td>
       <td>$${t.size}</td>
       <td style="color:var(--purple);font-weight:700">${t.lev}x</td>
+      <td style="color:var(--orange);font-size:11px">-$${feeOpen.toFixed(3)}</td>
+      <td style="color:var(--orange);font-size:11px">-$${feeClose.toFixed(3)}</td>
+      <td style="color:var(--red);font-size:11px;font-weight:600">-$${feesTotal.toFixed(3)}</td>
       <td class="${pCls}">${t.pnl>=0?'+':''}$${t.pnl.toFixed(2)}</td>
       <td class="${pCls}">${t.pnlPct>=0?'+':''}${t.pnlPct.toFixed(2)}%</td>
       <td><span class="tag ${t.won?'tag-win':'tag-loss'}">${t.won?'WIN':'LOSS'}</span></td>
@@ -856,7 +868,7 @@ function updateSimStats(){
   const wr=total>0?((sim.wins/total)*100).toFixed(1)+'%':'—';
   const unreal=Object.values(sim.positions).reduce((s,p)=>{
     const raw=p.dir==='LONG'?(p.currentPrice-p.entry)*p.qty:(p.entry-p.currentPrice)*p.qty;
-    return s+raw-p.notional*0.002;
+    return s+raw-p.notional*FEE_RATE*2;
   },0);
   const totalPnl=sim.realized+unreal;
   document.getElementById('stat-balance').textContent='$'+sim.balance.toFixed(2);
