@@ -453,6 +453,13 @@ td:first-child{text-align:left;font-weight:600;color:var(--text);}
 // ═══════════════════════════════════════════════
 const proxy = { url:'', connected:false, liveMode:false, realBalance:0 };
 
+// Use FormData POST → no CORS preflight → works with ngrok free tier
+function proxyPost(endpoint, data){
+  const fd = new FormData();
+  fd.append('payload', JSON.stringify(data));
+  return fetch(endpoint, { method:'POST', body:fd }).then(r=>r.json());
+}
+
 async function connectProxy(){
   const url = document.getElementById('proxy-url').value.trim().replace(/\/$/,'');
   if(!url){ alert('Nhập Proxy URL (ngrok link)!'); return; }
@@ -462,12 +469,8 @@ async function connectProxy(){
   btn.textContent = '⏳ Connecting...'; btn.disabled = true;
   log(`Connecting to proxy: ${url}`, 'y');
   try{
-    const res = await fetch(`${url}/connect`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'1'},
-      body:JSON.stringify({apiKey:apiCreds.key, secret:apiCreds.secret, passphrase:apiCreds.pass})
-    });
-    const data = await res.json();
+    const data = await proxyPost(`${url}/connect`,
+      {apiKey:apiCreds.key, secret:apiCreds.secret, passphrase:apiCreds.pass});
     if(data.ok){
       proxy.connected = true;
       proxy.realBalance = data.balance;
@@ -807,12 +810,8 @@ async function openTrade(row,source='MANUAL'){
     const side = dir==='LONG'?'buy':'sell';
     try{
       log(`[LIVE] Placing ${dir} ${row.symbol} ${lev}x $${size}...`,'y');
-      const res = await fetch(`${proxy.url}/order`,{
-        method:'POST',
-        headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'1'},
-        body:JSON.stringify({symbol:okxSym, side, size:qty, leverage:lev, tp:tpPct, sl:slPct})
-      });
-      const data = await res.json();
+      const data = await proxyPost(`${proxy.url}/order`,
+        {symbol:okxSym, side, size:qty, leverage:lev, tp:tpPct, sl:slPct});
       if(data.ok){
         const realEntry = data.price || entry;
         const realQty   = notional / realEntry;
@@ -867,12 +866,8 @@ async function closeTrade(id,reason='MANUAL'){
     const side   = pos.dir==='LONG'?'buy':'sell'; // reverse
     try{
       log(`[LIVE] Closing ${pos.dir} ${pos.symbol}...`,'y');
-      const res = await fetch(`${proxy.url}/close`,{
-        method:'POST',
-        headers:{'Content-Type':'application/json','ngrok-skip-browser-warning':'1'},
-        body:JSON.stringify({symbol:okxSym, side:pos.dir==='LONG'?'buy':'sell', size:pos.qty})
-      });
-      const data = await res.json();
+      const data = await proxyPost(`${proxy.url}/close`,
+        {symbol:okxSym, side:pos.dir==='LONG'?'buy':'sell', size:pos.qty});
       if(data.ok){
         log(`[LIVE ✓] Closed ${pos.symbol} | OrderID:${data.orderId}`,'g');
       } else {
