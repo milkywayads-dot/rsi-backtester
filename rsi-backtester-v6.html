@@ -962,52 +962,6 @@ function getMacdHist(macdMap, tsMs){
   return macdMap.get(dayKey)??null;
 }
 
-// ── UTC+7 MACD builder — dùng nến 1H gộp theo UTC+7 ──────────────────────
-function getPeriodKey(dayKey, tsMs, tfKey){
-  if(tfKey==='1d') return dayKey;
-  if(tfKey==='3d') return Math.floor(dayKey/3);
-  if(tfKey==='1w'){
-    // tìm thứ Hai của tuần theo UTC+7
-    const dow=new Date(tsMs+7*3600000).getUTCDay(); // 0=CN,1=T2...
-    const daysToMon=(dow===0)?6:dow-1;
-    return dayKey-daysToMon;
-  }
-  return dayKey;
-}
-function buildMacdMapUTC7(h1Candles, tfKey){
-  // Bước 1: gộp nến 1H → lấy close cuối mỗi period UTC+7
-  const periodMap=new Map(); // periodKey → {lastTs, close}
-  for(const c of h1Candles){
-    const ts   =c[0];
-    const close=parseFloat(c[4]);
-    const dayKey=Math.floor((ts+7*3600000)/86400000);
-    const pk   =getPeriodKey(dayKey,ts,tfKey);
-    const ex   =periodMap.get(pk);
-    if(!ex||ts>ex.lastTs) periodMap.set(pk,{lastTs:ts,close,pk});
-  }
-  // Bước 2: sắp xếp thời gian → tính MACD
-  const sorted=[...periodMap.values()].sort((a,b)=>a.lastTs-b.lastTs);
-  const closes=sorted.map(x=>x.close);
-  const ema12 =calcEMA(closes,12);
-  const ema26 =calcEMA(closes,26);
-  const diff  =closes.map((_,i)=>ema12[i]-ema26[i]);
-  const dea   =calcEMA(diff,9);
-  const hist  =diff.map((d,i)=>d-dea[i]);
-  // Bước 3: map histogram → tất cả dayKey trong mỗi period
-  const map=new Map();
-  for(let i=0;i<sorted.length;i++){
-    const pk=sorted[i].pk;
-    if(tfKey==='1d'){
-      map.set(pk,hist[i]);
-    } else if(tfKey==='3d'){
-      const base=pk*3;
-      for(let d=0;d<3;d++) map.set(base+d,hist[i]);
-    } else if(tfKey==='1w'){
-      for(let d=0;d<7;d++) map.set(pk+d,hist[i]);
-    }
-  }
-  return map;
-}
 
 function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, maxOrders, rsiPeriod, macdMap, align='trend'){
   const closes=candles.map(c=>parseFloat(c[4]));
@@ -1134,15 +1088,14 @@ async function runOptimizer(){
 
   try{
     candles1H=await fetchKlines(optState.coin,startTs,endTs,optState.rsiTF||'1h');
-    if(tfMacd.length>0){
-      // Fetch nến 1H mở rộng (lùi 90 ngày để EMA warmup đủ)
-      const macdStart=startTs-90*86400000;
-      optState.statusMsg=`Đang tải nến 1H (MACD UTC+7)...`;
+    for(const tf of tfMacd){
+      optState.statusMsg=`Đang tải nến ${tf.toUpperCase()} (MACD)...`;
       renderOptimizer();
-      const h1ForMacd=await fetchKlines(optState.coin,macdStart,endTs,'1h');
-      for(const tf of tfMacd){
-        macdMapByTf[tf]=buildMacdMapUTC7(h1ForMacd,tf);
-      }
+      const startD=startTs-60*86400000;
+      const urlTf=`https://api.binance.com/api/v3/klines?symbol=${optState.coin}&interval=${tf}&startTime=${startD}&endTime=${endTs}&limit=1000`;
+      const rTf=await fetch(urlTf);
+      if(!rTf.ok) throw new Error(`Lỗi fetch ${tf}: ${rTf.status}`);
+      macdMapByTf[tf]=buildMacdMap(await rTf.json());
     }
   }catch(e){
     optState.statusMsg='❌ Lỗi: '+e.message;
