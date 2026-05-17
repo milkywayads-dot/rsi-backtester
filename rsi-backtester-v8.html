@@ -222,9 +222,12 @@ tr:nth-child(even) td{background:rgba(243,244,246,.8);}
     <button class="add-btn" onclick="addSession()">+ Phiên</button>
   </div>
 
-  <div id="sessTabs" class="sess-tabs"></div>
-  <div id="configCard" class="card"></div>
-  <div id="results"></div>
+  <div id="backtestHdr"></div>
+  <div id="backtestContent">
+    <div id="sessTabs" class="sess-tabs"></div>
+    <div id="configCard" class="card"></div>
+    <div id="results"></div>
+  </div>
   <div id="optimizerSection" style="margin-top:8px;"></div>
 
   <div class="footer">⚠ Backtest chỉ mang tính tham khảo – không phải tư vấn đầu tư.</div>
@@ -238,6 +241,9 @@ let sid = 1, sessions = [mkSess(1)];
 let results = {}, revResults = {}, errors = {}, statusMsg = '';
 let activeS = 1, activeC = null;
 let expanded = new Set(), loading = false;
+let backtestOpen = false;
+let optimizerOpen = false;
+let feeRate = 0.1; // % phí mỗi chiều (round-trip = feeRate × 2)
 
 function mkSess(id){
   return { id, label:'Phiên '+id,
@@ -553,7 +559,35 @@ async function runSession(){
 // ══════════════════════════════════════════════
 //  RENDER
 // ══════════════════════════════════════════════
-function render(){renderTabs();renderConfig();renderResults();}
+function render(){renderBacktestHeader();renderTabs();renderConfig();renderResults();}
+
+function renderBacktestHeader(){
+  const hdr=document.getElementById('backtestHdr');
+  const content=document.getElementById('backtestContent');
+  if(!hdr||!content) return;
+  content.style.display=backtestOpen?'block':'none';
+  hdr.innerHTML=`
+    <div onclick="backtestOpen=!backtestOpen;render()" style="
+      display:flex;align-items:center;justify-content:space-between;
+      background:var(--bg1);border:1px solid var(--b1);border-radius:12px;
+      padding:12px 16px;margin-bottom:10px;cursor:pointer;
+      transition:border-color .15s;"
+      onmouseover="this.style.borderColor='var(--cyn)'"
+      onmouseout="this.style.borderColor='var(--b1)'">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:3px;height:22px;background:linear-gradient(180deg,var(--cyn),var(--grn));border-radius:4px;flex-shrink:0;"></div>
+        <div>
+          <div style="font-size:13px;font-weight:900;color:var(--hi);letter-spacing:.5px;">📊 RUN BACKTEST</div>
+          <div style="font-size:10px;color:var(--dim);margin-top:2px;letter-spacing:1px;">RSI + MACD Filter · Multi-coin · Đảo chiều</div>
+        </div>
+      </div>
+      <div style="font-size:11px;font-weight:700;color:var(--cyn);
+        background:rgba(8,145,178,.08);border:1px solid var(--cyn);
+        border-radius:6px;padding:4px 12px;flex-shrink:0;">
+        ${backtestOpen?'▲ Ẩn':'▼ Hiện'}
+      </div>
+    </div>`;
+}
 
 function renderTabs(){
   const el=document.getElementById('sessTabs');
@@ -795,6 +829,9 @@ function renderResults(){
   const wrColor=d.closed>0&&d.wins/d.closed>=0.5?'var(--grn)':'var(--ora)';
   const pnlColor=d.totalPnl>=0?'var(--grn)':'var(--red)';
   const pnlStr=(d.totalPnl>=0?'+':'')+d.totalPnl.toFixed(2)+'%';
+  const netPnlVal=d.totalPnl-(d.closed*feeRate*2);
+  const netPnlColor=netPnlVal>=0?'var(--grn)':'var(--red)';
+  const netPnlStr=(netPnlVal>=0?'+':'')+netPnlVal.toFixed(2)+'%';
   html+=`<div class="stats">
     <div class="sc"><div class="sc-lbl">Tín hiệu</div><div class="sc-val">${d.trades.length}</div></div>
     <div class="sc"><div class="sc-lbl">Đóng</div><div class="sc-val">${d.closed}</div></div>
@@ -802,6 +839,7 @@ function renderResults(){
     <div class="sc"><div class="sc-lbl">Thua</div><div class="sc-val" style="color:var(--red)">${d.losses}</div></div>
     <div class="sc"><div class="sc-lbl">Win Rate</div><div class="sc-val" style="color:${wrColor}">${wr}</div></div>
     <div class="sc"><div class="sc-lbl">Tổng PnL</div><div class="sc-val" style="color:${pnlColor}">${pnlStr}</div></div>
+    <div class="sc"><div class="sc-lbl">Net PnL (−${feeRate*2}%×lệnh)</div><div class="sc-val" style="font-size:16px;color:${netPnlColor}">${netPnlStr}</div></div>
   </div>`;
 
   if(d.closed>0){
@@ -862,7 +900,7 @@ function renderResults(){
   html+=`<div class="sum-wrap">
     <div class="sum-title">TỔNG KẾT TẤT CẢ COIN — ${sess?esc(sess.label):''}</div>
     <div class="tbl-scroll"><table>
-      <thead><tr><th>Coin</th><th>TH</th><th>Đóng</th><th>WIN</th><th>LOSS</th><th>Win Rate</th><th>PnL</th></tr></thead>
+      <thead><tr><th>Coin</th><th>TH</th><th>Đóng</th><th>WIN</th><th>LOSS</th><th>Win Rate</th><th>PnL</th><th>Net PnL</th></tr></thead>
       <tbody>`;
   syms.forEach(sym=>{
     const sd=res[sym];
@@ -870,12 +908,16 @@ function renderResults(){
     const wrc=parseFloat(wr2)>=50?'var(--grn)':'var(--ora)';
     const pnl2=(sd.totalPnl>=0?'+':'')+sd.totalPnl.toFixed(2)+'%';
     const pc=sd.totalPnl>=0?'var(--grn)':'var(--red)';
+    const net2=sd.totalPnl-(sd.closed*feeRate*2);
+    const netStr2=(net2>=0?'+':'')+net2.toFixed(2)+'%';
+    const nc=net2>=0?'var(--grn)':'var(--red)';
     html+=`<tr>
       <td style="color:var(--hi);font-weight:700">${sym}</td><td>${sd.trades.length}</td><td>${sd.closed}</td>
       <td style="color:var(--grn);font-weight:700">${sd.wins}</td>
       <td style="color:var(--red);font-weight:700">${sd.losses}</td>
       <td style="color:${wrc};font-weight:700">${wr2}</td>
       <td style="color:${pc};font-weight:700">${pnl2}</td>
+      <td style="color:${nc};font-weight:800">${netStr2}</td>
     </tr>`;
   });
   html+=`</tbody></table></div></div>`;
@@ -1313,9 +1355,21 @@ function renderOptimizer(){
   const o=optState;
   const rsiTF=o.rsiTF||'1h';
 
-  let html=`<div class="opt-card">
-    <div class="opt-title">🔍 AUTO OPTIMIZER</div>
-    <div class="opt-sub">Thử tự động ${OPT_RSI_PERIODS.length} RSI Period × ${OPT_RSI.length} RSI Level × ${OPT_TP.length} TP × ${OPT_SL.length} SL × 2 chiều × MACD modes được chọn</div>
+  let html=`<div class="opt-card" style="padding:${optimizerOpen?'16px':'12px 16px'}">
+    <div onclick="optimizerOpen=!optimizerOpen;renderOptimizer()" style="
+      display:flex;align-items:center;justify-content:space-between;
+      cursor:pointer;${optimizerOpen?'margin-bottom:12px':''}">
+      <div>
+        <div class="opt-title">🔍 AUTO OPTIMIZER</div>
+        ${optimizerOpen?`<div class="opt-sub" style="margin-bottom:0">Thử tự động ${OPT_RSI_PERIODS.length} RSI Period × ${OPT_RSI.length} RSI Level × ${OPT_TP.length} TP × ${OPT_SL.length} SL × 2 chiều × MACD modes được chọn</div>`:''}
+      </div>
+      <div style="font-size:11px;font-weight:700;color:var(--acc);
+        background:rgba(79,70,229,.08);border:1px solid var(--acc);
+        border-radius:6px;padding:4px 12px;flex-shrink:0;margin-left:12px;">
+        ${optimizerOpen?'▲ Ẩn':'▼ Hiện'}
+      </div>
+    </div>
+  ${optimizerOpen?`
 
     <div class="opt-grid">
       <div><div class="flbl">Coin</div>
@@ -1323,6 +1377,9 @@ function renderOptimizer(){
       </div>
       <div><div class="flbl">Số lệnh tối thiểu</div>
         <input type="number" min="10" max="9999" value="${o.minTrades}" oninput="optState.minTrades=parseInt(this.value)||50">
+      </div>
+      <div><div class="flbl">Phí/chiều (%)</div>
+        <input type="number" min="0" max="1" step="0.01" value="${feeRate}" oninput="feeRate=parseFloat(this.value)||0.1;renderOptimizer()" style="font-family:monospace" placeholder="0.1">
       </div>
       <div><div class="flbl">Từ ngày</div>
         <input type="text" value="${esc(o.start)}" oninput="optState.start=this.value">
@@ -1505,7 +1562,7 @@ function renderOptimizer(){
         <thead><tr>
           <th>#</th><th>MACD</th><th>Period</th><th>Hướng</th>
           <th>RSI Lv</th><th>TP%</th><th>SL%</th><th>R:R</th>
-          <th>Lệnh</th><th>WIN</th><th>LOSS</th><th>WinRate</th><th>PnL</th>
+          <th>Lệnh</th><th>WIN</th><th>LOSS</th><th>WinRate</th><th>PnL</th><th>Net PnL</th>
         </tr></thead>
         <tbody>
         ${(()=>{
@@ -1539,6 +1596,7 @@ function renderOptimizer(){
               <td style="color:var(--red);font-weight:700">${r.losses}</td>
               <td style="color:${wrc};font-weight:800">${r.wr}%</td>
               <td style="color:${pc};font-weight:800">${r.pnl>=0?'+':''}${r.pnl}%</td>
+              ${(()=>{const net=r.pnl-(r.trades*feeRate*2);const nc=net>=0?'var(--grn)':'var(--red)';return `<td style="color:${nc};font-weight:800">${net>=0?'+':''}${net.toFixed(2)}%</td>`;})()}
             </tr>`;
           }).join('');
         })()}
@@ -1557,6 +1615,7 @@ function renderOptimizer(){
       ⚠ Không tìm thấy tổ hợp nào thỏa điều kiện.<br>
       <span style="font-size:11px;">Thử giảm Win Rate mục tiêu hoặc số lệnh tối thiểu.</span>
     </div>`:'')}
+  `:''}
   </div>`;
 
   el.innerHTML=html;
