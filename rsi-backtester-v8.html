@@ -243,7 +243,7 @@ let activeS = 1, activeC = null;
 let expanded = new Set(), loading = false;
 let backtestOpen = false;
 let optimizerOpen = false;
-let feeRate = 0.1; // % phí mỗi chiều (round-trip = feeRate × 2)
+let feeRate = 0.1; // % phí round-trip/lệnh (OKX futures taker: 0.05%×2 = 0.1%)
 
 function mkSess(id){
   return { id, label:'Phiên '+id,
@@ -829,7 +829,7 @@ function renderResults(){
   const wrColor=d.closed>0&&d.wins/d.closed>=0.5?'var(--grn)':'var(--ora)';
   const pnlColor=d.totalPnl>=0?'var(--grn)':'var(--red)';
   const pnlStr=(d.totalPnl>=0?'+':'')+d.totalPnl.toFixed(2)+'%';
-  const netPnlVal=d.totalPnl-(d.closed*feeRate*2);
+  const netPnlVal=d.totalPnl-(d.closed*feeRate);
   const netPnlColor=netPnlVal>=0?'var(--grn)':'var(--red)';
   const netPnlStr=(netPnlVal>=0?'+':'')+netPnlVal.toFixed(2)+'%';
   html+=`<div class="stats">
@@ -839,7 +839,7 @@ function renderResults(){
     <div class="sc"><div class="sc-lbl">Thua</div><div class="sc-val" style="color:var(--red)">${d.losses}</div></div>
     <div class="sc"><div class="sc-lbl">Win Rate</div><div class="sc-val" style="color:${wrColor}">${wr}</div></div>
     <div class="sc"><div class="sc-lbl">Tổng PnL</div><div class="sc-val" style="color:${pnlColor}">${pnlStr}</div></div>
-    <div class="sc"><div class="sc-lbl">Net PnL (−${feeRate*2}%×lệnh)</div><div class="sc-val" style="font-size:16px;color:${netPnlColor}">${netPnlStr}</div></div>
+    <div class="sc"><div class="sc-lbl">Net PnL (−${feeRate}%×lệnh)</div><div class="sc-val" style="font-size:16px;color:${netPnlColor}">${netPnlStr}</div></div>
   </div>`;
 
   if(d.closed>0){
@@ -908,7 +908,7 @@ function renderResults(){
     const wrc=parseFloat(wr2)>=50?'var(--grn)':'var(--ora)';
     const pnl2=(sd.totalPnl>=0?'+':'')+sd.totalPnl.toFixed(2)+'%';
     const pc=sd.totalPnl>=0?'var(--grn)':'var(--red)';
-    const net2=sd.totalPnl-(sd.closed*feeRate*2);
+    const net2=sd.totalPnl-(sd.closed*feeRate);
     const netStr2=(net2>=0?'+':'')+net2.toFixed(2)+'%';
     const nc=net2>=0?'var(--grn)':'var(--red)';
     html+=`<tr>
@@ -1378,9 +1378,6 @@ function renderOptimizer(){
       <div><div class="flbl">Số lệnh tối thiểu</div>
         <input type="number" min="10" max="9999" value="${o.minTrades}" oninput="optState.minTrades=parseInt(this.value)||50">
       </div>
-      <div><div class="flbl">Phí/chiều (%)</div>
-        <input type="number" min="0" max="1" step="0.01" value="${feeRate}" oninput="feeRate=parseFloat(this.value)||0.1;renderOptimizer()" style="font-family:monospace" placeholder="0.1">
-      </div>
       <div><div class="flbl">Từ ngày</div>
         <input type="text" value="${esc(o.start)}" oninput="optState.start=this.value">
       </div>
@@ -1596,7 +1593,7 @@ function renderOptimizer(){
               <td style="color:var(--red);font-weight:700">${r.losses}</td>
               <td style="color:${wrc};font-weight:800">${r.wr}%</td>
               <td style="color:${pc};font-weight:800">${r.pnl>=0?'+':''}${r.pnl}%</td>
-              ${(()=>{const net=r.pnl-(r.trades*feeRate*2);const nc=net>=0?'var(--grn)':'var(--red)';return `<td style="color:${nc};font-weight:800">${net>=0?'+':''}${net.toFixed(2)}%</td>`;})()}
+              ${(()=>{const net=r.pnl-(r.trades*feeRate);const nc=net>=0?'var(--grn)':'var(--red)';return `<td style="color:${nc};font-weight:800">${net>=0?'+':''}${net.toFixed(2)}%</td>`;})()}
             </tr>`;
           }).join('');
         })()}
