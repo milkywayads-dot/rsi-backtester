@@ -264,6 +264,7 @@ function mkSlot(id){
     id, expanded:true,
     coin:'BTCUSDT', sizeUsd:10, leverage:10, maxOrders:1,
     macdTf:'1d', rsiTf:'1h',
+    macdAuto:true,
     longEnabled:true, shortEnabled:true,
     long:{rsiPeriod:14, rsiLevel:55, tp:4, sl:2},
     short:{rsiPeriod:14, rsiLevel:45, tp:4, sl:2}
@@ -312,7 +313,7 @@ function saveSlotConfig(slotId){
   const def=s.coin.replace('USDT','')+'_cfg';
   const name=(prompt('Tên cấu hình (VD: BTC1, ETH_15m):',def)||'').trim();
   if(!name) return;
-  const cfg={coin:s.coin,sizeUsd:s.sizeUsd,leverage:s.leverage,maxOrders:s.maxOrders,macdTf:s.macdTf,rsiTf:s.rsiTf,long:{...s.long},short:{...s.short},longEnabled:s.longEnabled!==false,shortEnabled:s.shortEnabled!==false};
+  const cfg={coin:s.coin,sizeUsd:s.sizeUsd,leverage:s.leverage,maxOrders:s.maxOrders,macdTf:s.macdTf,rsiTf:s.rsiTf,macdAuto:s.macdAuto!==false,long:{...s.long},short:{...s.short},longEnabled:s.longEnabled!==false,shortEnabled:s.shortEnabled!==false};
   const blob=new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
@@ -332,6 +333,7 @@ function loadSlotConfig(slotId,input){
       if(cfg.maxOrders!==undefined) s.maxOrders=cfg.maxOrders;
       if(cfg.macdTf!==undefined) s.macdTf=cfg.macdTf;
       if(cfg.rsiTf!==undefined) s.rsiTf=cfg.rsiTf;
+      if(cfg.macdAuto!==undefined) s.macdAuto=cfg.macdAuto;
       if(cfg.long) s.long={...s.long,...cfg.long};
       if(cfg.short) s.short={...s.short,...cfg.short};
       if(cfg.longEnabled!==undefined) s.longEnabled=cfg.longEnabled;
@@ -1717,6 +1719,19 @@ function renderOptimizer(){
   el.innerHTML=html;
 }
 
+// ── Wrapper cho MACD OFF: gọi backtest() rồi gán rawTs từ candle timestamps ──
+function backtestNoMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, maxOrders, rsiPeriod){
+  const trades=backtest(candles,dir,startTs,endTs,rsiLevel,tpPct,slPct,maxOrders,rsiPeriod);
+  const timeLookup=new Map();
+  candles.forEach(c=>{
+    const d=new Date(c[0]);
+    const key=pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes());
+    if(!timeLookup.has(key)) timeLookup.set(key,c[0]);
+  });
+  trades.forEach(t=>{t.rawTs=timeLookup.get(t.time)||0;});
+  return trades;
+}
+
 // ══════════════════════════════════════════════
 //  MULTI SLOT — RUN + RENDER
 // ══════════════════════════════════════════════
@@ -1741,38 +1756,45 @@ async function runMultiSlot(){
       setMultiStatus('⏳ '+sym+': tải nến RSI '+slot.rsiTf.toUpperCase()+'...');
       const candles=await fetchKlines(sym,startTs,endTs,slot.rsiTf);
 
-      setMultiStatus('⏳ '+sym+': tải MACD '+slot.macdTf.toUpperCase()+'...');
-      const startMacd=startTs-60*86400000;
-      const periodMs=MACD_INTRADAY_MS[slot.macdTf];
-      let macdMap;
-      if(periodMs){
-        const raw=await fetchKlines(sym,startMacd,endTs,slot.macdTf);
-        macdMap=buildMacdMapIntraday(raw,periodMs);
-      } else {
-        const url=`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${slot.macdTf}&startTime=${startMacd}&endTime=${endTs}&limit=1000`;
-        const resp=await fetch(url);
-        if(!resp.ok) throw new Error(sym+': lỗi MACD '+slot.macdTf+' HTTP '+resp.status);
-        macdMap=buildMacdMap(await resp.json());
+      let macdMap=null, lookupFn=null;
+      if(slot.macdAuto!==false){
+        setMultiStatus('⏳ '+sym+': tải MACD '+slot.macdTf.toUpperCase()+'...');
+        const startMacd=startTs-60*86400000;
+        const periodMs=MACD_INTRADAY_MS[slot.macdTf];
+        if(periodMs){
+          const raw=await fetchKlines(sym,startMacd,endTs,slot.macdTf);
+          macdMap=buildMacdMapIntraday(raw,periodMs);
+        } else {
+          const url=`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${slot.macdTf}&startTime=${startMacd}&endTime=${endTs}&limit=1000`;
+          const resp=await fetch(url);
+          if(!resp.ok) throw new Error(sym+': lỗi MACD '+slot.macdTf+' HTTP '+resp.status);
+          macdMap=buildMacdMap(await resp.json());
+        }
+        const periodMs2=MACD_INTRADAY_MS[slot.macdTf];
+        lookupFn=periodMs2?(map,ts)=>getMacdHistIntraday(map,ts,periodMs2):getMacdHist;
       }
 
-      const lookupFn=periodMs?(map,ts)=>getMacdHistIntraday(map,ts,periodMs):getMacdHist;
       const maxOrd=slot.maxOrders===0?0:(parseInt(slot.maxOrders)||1);
 
-      // ── Long backtest (hist>0, RSI cắt lên) — chỉ chạy khi longEnabled
-      const longTrades=slot.longEnabled!==false?backtestWithMacd(candles,'buy',startTs,endTs,
-        parseFloat(slot.long.rsiLevel)||55,
-        parseFloat(slot.long.tp)||4,
-        parseFloat(slot.long.sl)||2,
-        maxOrd, parseInt(slot.long.rsiPeriod)||14,
-        macdMap,'trend',lookupFn):[];
+      // ── Long backtest — chỉ chạy khi longEnabled
+      const longTrades=slot.longEnabled!==false?(slot.macdAuto!==false
+        ?backtestWithMacd(candles,'buy',startTs,endTs,
+          parseFloat(slot.long.rsiLevel)||55,parseFloat(slot.long.tp)||4,parseFloat(slot.long.sl)||2,
+          maxOrd,parseInt(slot.long.rsiPeriod)||14,macdMap,'trend',lookupFn)
+        :backtestNoMacd(candles,'buy',startTs,endTs,
+          parseFloat(slot.long.rsiLevel)||55,parseFloat(slot.long.tp)||4,parseFloat(slot.long.sl)||2,
+          maxOrd,parseInt(slot.long.rsiPeriod)||14)
+      ):[];
 
-      // ── Short backtest (hist<0, RSI cắt xuống) — chỉ chạy khi shortEnabled
-      const shortTrades=slot.shortEnabled!==false?backtestWithMacd(candles,'sell',startTs,endTs,
-        parseFloat(slot.short.rsiLevel)||45,
-        parseFloat(slot.short.tp)||4,
-        parseFloat(slot.short.sl)||2,
-        maxOrd, parseInt(slot.short.rsiPeriod)||14,
-        macdMap,'trend',lookupFn):[];
+      // ── Short backtest — chỉ chạy khi shortEnabled
+      const shortTrades=slot.shortEnabled!==false?(slot.macdAuto!==false
+        ?backtestWithMacd(candles,'sell',startTs,endTs,
+          parseFloat(slot.short.rsiLevel)||45,parseFloat(slot.short.tp)||4,parseFloat(slot.short.sl)||2,
+          maxOrd,parseInt(slot.short.rsiPeriod)||14,macdMap,'trend',lookupFn)
+        :backtestNoMacd(candles,'sell',startTs,endTs,
+          parseFloat(slot.short.rsiLevel)||45,parseFloat(slot.short.tp)||4,parseFloat(slot.short.sl)||2,
+          maxOrd,parseInt(slot.short.rsiPeriod)||14)
+      ):[];
 
       // ── Merge & sort theo rawTs
       const slotTrades=[
@@ -1837,7 +1859,9 @@ function renderMultiSlot(){
       </div>
       <div style="padding:8px 13px;display:flex;gap:5px;flex-wrap:wrap;">
         <span style="background:rgba(8,145,178,.1);color:var(--cyn);border:1px solid rgba(8,145,178,.2);border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;">${slot.coin.replace('USDT','')}</span>
-        <span style="background:rgba(8,145,178,.1);color:var(--cyn);border:1px solid rgba(8,145,178,.2);border-radius:6px;padding:2px 8px;font-size:11px;">MACD auto · ${slot.macdTf.toUpperCase()}</span>
+        ${slot.macdAuto!==false
+          ?`<span style="background:rgba(8,145,178,.1);color:var(--cyn);border:1px solid rgba(8,145,178,.2);border-radius:6px;padding:2px 8px;font-size:11px;">MACD auto · ${slot.macdTf.toUpperCase()}</span>`
+          :`<span style="background:var(--bg2);color:var(--dim);border:1px solid var(--b2);border-radius:6px;padding:2px 8px;font-size:11px;">MACD tắt</span>`}
         <span style="background:var(--bg2);border:1px solid var(--b1);border-radius:6px;padding:2px 8px;font-size:11px;color:var(--dim);">$${slot.sizeUsd}·${slot.leverage}x·${slot.maxOrders===0?'Multi':slot.maxOrders+'L'}</span>
         <span style="background:var(--bg2);border:1px solid var(--b1);border-radius:6px;padding:2px 8px;font-size:11px;color:var(--dim);">RSI ${slot.rsiTf.toUpperCase()}</span>
         ${longOn
@@ -1888,7 +1912,18 @@ function renderMultiSlot(){
                   ${opt.l}</button>`).join('')}
             </div>
           </div>
-          <div><div class="flbl">Nến MACD</div>
+          <div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+              <div class="flbl" style="margin-bottom:0;">Nến MACD</div>
+              <button onclick="setSlot(${slot.id},'macdAuto',${slot.macdAuto!==false?'false':'true'})" style="
+                font:700 10px/1 'Outfit',sans-serif;padding:3px 10px;border-radius:5px;cursor:pointer;transition:all .15s;
+                background:${slot.macdAuto!==false?'rgba(8,145,178,.08)':'var(--bg3)'};
+                border:1px solid ${slot.macdAuto!==false?'var(--cyn)':'var(--b2)'};
+                color:${slot.macdAuto!==false?'var(--cyn)':'var(--dim)'};">
+                ${slot.macdAuto!==false?'✓ BẬT':'✕ TẮT'}
+              </button>
+            </div>
+            ${slot.macdAuto!==false?`
             <div style="display:flex;gap:5px;flex-wrap:wrap;">
               ${['1h','2h','4h','1d','3d','1w'].map(tf=>`
                 <button onclick="setSlot(${slot.id},'macdTf','${tf}')" style="
@@ -1898,7 +1933,8 @@ function renderMultiSlot(){
                   border:1.5px solid ${slot.macdTf===tf?'var(--cyn)':'var(--b2)'};
                   color:${slot.macdTf===tf?'var(--cyn)':'var(--dim)'};">
                   ${tf.toUpperCase()}</button>`).join('')}
-            </div>
+            </div>`
+            :`<div style="font-size:11px;color:var(--dim);padding:6px 0;">RSI thuần — không lọc MACD</div>`}
           </div>
         </div>
 
