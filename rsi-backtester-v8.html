@@ -262,6 +262,7 @@ function mkSlot(id){
     id, expanded:true,
     coin:'BTCUSDT', sizeUsd:10, leverage:10, maxOrders:1,
     macdTf:'1d', rsiTf:'1h',
+    longEnabled:true, shortEnabled:true,
     long:{rsiPeriod:14, rsiLevel:55, tp:4, sl:2},
     short:{rsiPeriod:14, rsiLevel:45, tp:4, sl:2}
   };
@@ -1709,21 +1710,21 @@ async function runMultiSlot(){
       const lookupFn=periodMs?(map,ts)=>getMacdHistIntraday(map,ts,periodMs):getMacdHist;
       const maxOrd=parseInt(slot.maxOrders)||1;
 
-      // ── Long backtest (hist>0, RSI cắt lên)
-      const longTrades=backtestWithMacd(candles,'buy',startTs,endTs,
+      // ── Long backtest (hist>0, RSI cắt lên) — chỉ chạy khi longEnabled
+      const longTrades=slot.longEnabled!==false?backtestWithMacd(candles,'buy',startTs,endTs,
         parseFloat(slot.long.rsiLevel)||55,
         parseFloat(slot.long.tp)||4,
         parseFloat(slot.long.sl)||2,
         maxOrd, parseInt(slot.long.rsiPeriod)||14,
-        macdMap,'trend',lookupFn);
+        macdMap,'trend',lookupFn):[];
 
-      // ── Short backtest (hist<0, RSI cắt xuống)
-      const shortTrades=backtestWithMacd(candles,'sell',startTs,endTs,
+      // ── Short backtest (hist<0, RSI cắt xuống) — chỉ chạy khi shortEnabled
+      const shortTrades=slot.shortEnabled!==false?backtestWithMacd(candles,'sell',startTs,endTs,
         parseFloat(slot.short.rsiLevel)||45,
         parseFloat(slot.short.tp)||4,
         parseFloat(slot.short.sl)||2,
         maxOrd, parseInt(slot.short.rsiPeriod)||14,
-        macdMap,'trend',lookupFn);
+        macdMap,'trend',lookupFn):[];
 
       // ── Merge & sort theo rawTs
       const slotTrades=[
@@ -1774,6 +1775,8 @@ function renderMultiSlot(){
   function renderSlotCollapsed(slot){
     const lbl=`▲ P${slot.long.rsiPeriod}·Lv${slot.long.rsiLevel}·TP${slot.long.tp}%·SL${slot.long.sl}%`;
     const slbl=`▼ P${slot.short.rsiPeriod}·Lv${slot.short.rsiLevel}·TP${slot.short.tp}%·SL${slot.short.sl}%`;
+    const longOn=slot.longEnabled!==false;
+    const shortOn=slot.shortEnabled!==false;
     return `<div style="background:var(--bg1);border:1px solid var(--b1);border-radius:12px;margin-bottom:8px;overflow:hidden;">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 13px;background:var(--bg2);">
         <span style="font-size:13px;font-weight:700;color:var(--hi)">Slot ${slot.id}</span>
@@ -1787,8 +1790,12 @@ function renderMultiSlot(){
         <span style="background:rgba(8,145,178,.1);color:var(--cyn);border:1px solid rgba(8,145,178,.2);border-radius:6px;padding:2px 8px;font-size:11px;">MACD auto · ${slot.macdTf.toUpperCase()}</span>
         <span style="background:var(--bg2);border:1px solid var(--b1);border-radius:6px;padding:2px 8px;font-size:11px;color:var(--dim);">$${slot.sizeUsd}·${slot.leverage}x·${slot.maxOrders===0?'Multi':slot.maxOrders+'L'}</span>
         <span style="background:var(--bg2);border:1px solid var(--b1);border-radius:6px;padding:2px 8px;font-size:11px;color:var(--dim);">RSI ${slot.rsiTf.toUpperCase()}</span>
-        <span style="background:var(--grn-bg);color:var(--grn);border:1px solid var(--grn);border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;">${lbl}</span>
-        <span style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;">${slbl}</span>
+        ${longOn
+          ?`<span style="background:var(--grn-bg);color:var(--grn);border:1px solid var(--grn);border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;">${lbl}</span>`
+          :`<span style="background:var(--bg2);color:var(--dim);border:1px solid var(--b2);border-radius:6px;padding:2px 8px;font-size:11px;text-decoration:line-through;">▲ LONG tắt</span>`}
+        ${shortOn
+          ?`<span style="background:var(--red-bg);color:var(--red);border:1px solid var(--red);border-radius:6px;padding:2px 8px;font-size:11px;font-weight:700;">${slbl}</span>`
+          :`<span style="background:var(--bg2);color:var(--dim);border:1px solid var(--b2);border-radius:6px;padding:2px 8px;font-size:11px;text-decoration:line-through;">▼ SHORT tắt</span>`}
       </div>
     </div>`;
   }
@@ -1857,8 +1864,18 @@ function renderMultiSlot(){
           </div>
         </div>
 
-        <div style="border:1.5px solid var(--grn);border-radius:10px;padding:11px;margin-bottom:10px;background:rgba(22,163,74,.04);">
-          <div style="font-size:11px;font-weight:700;color:var(--grn);letter-spacing:1px;margin-bottom:10px;">▲ LONG — CẤU HÌNH RIÊNG</div>
+        <div style="border:1.5px solid ${slot.longEnabled!==false?'var(--grn)':'var(--b2)'};border-radius:10px;padding:11px;margin-bottom:10px;background:${slot.longEnabled!==false?'rgba(22,163,74,.04)':'var(--bg2)'};transition:all .15s;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${slot.longEnabled!==false?'10px':'0'};">
+            <div style="font-size:11px;font-weight:700;color:${slot.longEnabled!==false?'var(--grn)':'var(--dim)'};letter-spacing:1px;">▲ LONG — CẤU HÌNH RIÊNG</div>
+            <button onclick="setSlot(${slot.id},'longEnabled',${slot.longEnabled!==false?'false':'true'})" style="
+              font:700 10px/1 'Outfit',sans-serif;padding:3px 10px;border-radius:5px;cursor:pointer;transition:all .15s;
+              background:${slot.longEnabled!==false?'var(--grn-bg)':'var(--bg3)'};
+              border:1px solid ${slot.longEnabled!==false?'var(--grn)':'var(--b2)'};
+              color:${slot.longEnabled!==false?'var(--grn)':'var(--dim)'};">
+              ${slot.longEnabled!==false?'✓ BẬT':'✕ TẮT'}
+            </button>
+          </div>
+          ${slot.longEnabled!==false?`
           <div style="margin-bottom:9px;">
             <div class="flbl">RSI Period</div>
             <div style="display:flex;gap:6px;">${periodBtns(slot.id,'long',slot)}</div>
@@ -1873,11 +1890,21 @@ function renderMultiSlot(){
             <div><div style="font-size:10px;color:var(--grn);font-weight:700;letter-spacing:1.5px;margin-bottom:5px;">SL %</div>
               <input type="number" min="0.1" step="0.5" value="${slot.long.sl}" oninput="setSlotDir(${slot.id},'long','sl',parseFloat(this.value)||2)" style="text-align:center;border-color:var(--grn);">
             </div>
-          </div>
+          </div>`:''}
         </div>
 
-        <div style="border:1.5px solid var(--red);border-radius:10px;padding:11px;background:rgba(220,38,38,.04);">
-          <div style="font-size:11px;font-weight:700;color:var(--red);letter-spacing:1px;margin-bottom:10px;">▼ SHORT — CẤU HÌNH RIÊNG</div>
+        <div style="border:1.5px solid ${slot.shortEnabled!==false?'var(--red)':'var(--b2)'};border-radius:10px;padding:11px;background:${slot.shortEnabled!==false?'rgba(220,38,38,.04)':'var(--bg2)'};transition:all .15s;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:${slot.shortEnabled!==false?'10px':'0'};">
+            <div style="font-size:11px;font-weight:700;color:${slot.shortEnabled!==false?'var(--red)':'var(--dim)'};letter-spacing:1px;">▼ SHORT — CẤU HÌNH RIÊNG</div>
+            <button onclick="setSlot(${slot.id},'shortEnabled',${slot.shortEnabled!==false?'false':'true'})" style="
+              font:700 10px/1 'Outfit',sans-serif;padding:3px 10px;border-radius:5px;cursor:pointer;transition:all .15s;
+              background:${slot.shortEnabled!==false?'var(--red-bg)':'var(--bg3)'};
+              border:1px solid ${slot.shortEnabled!==false?'var(--red)':'var(--b2)'};
+              color:${slot.shortEnabled!==false?'var(--red)':'var(--dim)'};">
+              ${slot.shortEnabled!==false?'✓ BẬT':'✕ TẮT'}
+            </button>
+          </div>
+          ${slot.shortEnabled!==false?`
           <div style="margin-bottom:9px;">
             <div class="flbl">RSI Period</div>
             <div style="display:flex;gap:6px;">${periodBtns(slot.id,'short',slot)}</div>
@@ -1892,7 +1919,7 @@ function renderMultiSlot(){
             <div><div style="font-size:10px;color:var(--red);font-weight:700;letter-spacing:1.5px;margin-bottom:5px;">SL %</div>
               <input type="number" min="0.1" step="0.5" value="${slot.short.sl}" oninput="setSlotDir(${slot.id},'short','sl',parseFloat(this.value)||2)" style="text-align:center;border-color:var(--red);">
             </div>
-          </div>
+          </div>`:''}
         </div>
 
       </div>
