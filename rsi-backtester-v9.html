@@ -312,7 +312,7 @@ function saveSlotConfig(slotId){
   const def=s.coin.replace('USDT','')+'_cfg';
   const name=(prompt('Tên cấu hình (VD: BTC1, ETH_15m):',def)||'').trim();
   if(!name) return;
-  const cfg={coin:s.coin,long:{...s.long},short:{...s.short},longEnabled:s.longEnabled!==false,shortEnabled:s.shortEnabled!==false};
+  const cfg={coin:s.coin,sizeUsd:s.sizeUsd,leverage:s.leverage,maxOrders:s.maxOrders,macdTf:s.macdTf,rsiTf:s.rsiTf,long:{...s.long},short:{...s.short},longEnabled:s.longEnabled!==false,shortEnabled:s.shortEnabled!==false};
   const blob=new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
@@ -327,6 +327,11 @@ function loadSlotConfig(slotId,input){
     try{
       const cfg=JSON.parse(e.target.result);
       const s=slots.find(x=>x.id===slotId);if(!s) return;
+      if(cfg.sizeUsd!==undefined) s.sizeUsd=cfg.sizeUsd;
+      if(cfg.leverage!==undefined) s.leverage=cfg.leverage;
+      if(cfg.maxOrders!==undefined) s.maxOrders=cfg.maxOrders;
+      if(cfg.macdTf!==undefined) s.macdTf=cfg.macdTf;
+      if(cfg.rsiTf!==undefined) s.rsiTf=cfg.rsiTf;
       if(cfg.long) s.long={...s.long,...cfg.long};
       if(cfg.short) s.short={...s.short,...cfg.short};
       if(cfg.longEnabled!==undefined) s.longEnabled=cfg.longEnabled;
