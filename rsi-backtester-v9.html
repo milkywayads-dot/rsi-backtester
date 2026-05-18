@@ -256,6 +256,8 @@ let slots = [mkSlot(1)];
 let msStart = '01/01/2025';
 let msEnd = todayStr();
 let msShowAll = false;
+let msSortBy = 'entry';
+let msSortDir = 'asc';
 
 function mkSlot(id){
   return {
@@ -293,6 +295,47 @@ function setMultiStatus(msg){
   multiSlotStatus=msg;
   const el=document.getElementById('msStatusLine');
   if(el) el.textContent=msg;
+}
+function setSortMs(by){
+  if(msSortBy===by) msSortDir=msSortDir==='asc'?'desc':'asc';
+  else{msSortBy=by;msSortDir='asc';}
+  renderMultiSlot();
+}
+function parseExitKey(str){
+  if(!str||str==='—') return 9999999999;
+  const m=str.match(/^(\d+)\/(\d+)\s+(\d+):(\d+)$/);
+  if(!m) return 9999999999;
+  return parseInt(m[2])*1000000+parseInt(m[1])*10000+parseInt(m[3])*100+parseInt(m[4]);
+}
+function saveSlotConfig(slotId){
+  const s=slots.find(x=>x.id===slotId);if(!s) return;
+  const def=s.coin.replace('USDT','')+'_cfg';
+  const name=(prompt('Tên cấu hình (VD: BTC1, ETH_15m):',def)||'').trim();
+  if(!name) return;
+  const cfg={coin:s.coin,long:{...s.long},short:{...s.short},longEnabled:s.longEnabled!==false,shortEnabled:s.shortEnabled!==false};
+  const blob=new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=name+'.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function loadSlotConfig(slotId,input){
+  const file=input.files[0];if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    try{
+      const cfg=JSON.parse(e.target.result);
+      const s=slots.find(x=>x.id===slotId);if(!s) return;
+      if(cfg.long) s.long={...s.long,...cfg.long};
+      if(cfg.short) s.short={...s.short,...cfg.short};
+      if(cfg.longEnabled!==undefined) s.longEnabled=cfg.longEnabled;
+      if(cfg.shortEnabled!==undefined) s.shortEnabled=cfg.shortEnabled;
+      renderMultiSlot();
+    }catch(err){alert('File JSON không hợp lệ');}
+  };
+  reader.readAsText(file);
+  input.value='';
 }
 
 function mkSess(id){
@@ -1781,6 +1824,8 @@ function renderMultiSlot(){
       <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 13px;background:var(--bg2);">
         <span style="font-size:13px;font-weight:700;color:var(--hi)">Slot ${slot.id}</span>
         <div style="display:flex;gap:6px;align-items:center;">
+          <span onclick="saveSlotConfig(${slot.id})" style="font-size:11px;color:var(--grn);background:rgba(22,163,74,.08);border:1px solid var(--grn);border-radius:6px;padding:3px 8px;cursor:pointer;" title="Lưu cấu hình">💾</span>
+          <label style="font-size:11px;color:var(--acc);background:rgba(79,70,229,.08);border:1px solid var(--acc);border-radius:6px;padding:3px 8px;cursor:pointer;" title="Load cấu hình">📂<input type="file" accept=".json" style="display:none" onchange="loadSlotConfig(${slot.id},this)"></label>
           ${slots.length>1?`<span onclick="removeSlot(${slot.id})" style="font-size:14px;color:var(--b3);cursor:pointer;padding:0 4px;" title="Xóa">✕</span>`:''}
           <span onclick="toggleSlot(${slot.id})" style="font-size:11px;color:var(--cyn);background:rgba(8,145,178,.08);border:1px solid var(--cyn);border-radius:6px;padding:3px 10px;cursor:pointer;">▼</span>
         </div>
@@ -1805,6 +1850,8 @@ function renderMultiSlot(){
       <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 13px;background:var(--bg2);">
         <span style="font-size:13px;font-weight:700;color:var(--hi)">Slot ${slot.id}</span>
         <div style="display:flex;gap:6px;align-items:center;">
+          <span onclick="saveSlotConfig(${slot.id})" style="font-size:11px;color:var(--grn);background:rgba(22,163,74,.08);border:1px solid var(--grn);border-radius:6px;padding:3px 8px;cursor:pointer;" title="Lưu cấu hình">💾</span>
+          <label style="font-size:11px;color:var(--acc);background:rgba(79,70,229,.08);border:1px solid var(--acc);border-radius:6px;padding:3px 8px;cursor:pointer;" title="Load cấu hình">📂<input type="file" accept=".json" style="display:none" onchange="loadSlotConfig(${slot.id},this)"></label>
           ${slots.length>1?`<span onclick="removeSlot(${slot.id})" style="font-size:14px;color:var(--b3);cursor:pointer;padding:0 4px;" title="Xóa">✕</span>`:''}
           <span onclick="toggleSlot(${slot.id})" style="font-size:11px;color:var(--cyn);background:rgba(8,145,178,.08);border:1px solid var(--cyn);border-radius:6px;padding:3px 10px;cursor:pointer;">▲</span>
         </div>
@@ -1972,8 +2019,15 @@ function renderMultiSlot(){
     </div></div>`;
 
     const trades=o.allTrades;
+    const sorted=[...trades].sort((a,b)=>{
+      if(msSortBy==='exit'){const ae=parseExitKey(a.exitTime),be=parseExitKey(b.exitTime);return msSortDir==='asc'?ae-be:be-ae;}
+      return msSortDir==='asc'?a.rawTs-b.rawTs:b.rawTs-a.rawTs;
+    });
     const showAll=msShowAll;
-    const disp=showAll?trades:trades.slice(0,40);
+    const disp=showAll?sorted:sorted.slice(0,40);
+    const thStyle='cursor:pointer;user-select:none;white-space:nowrap;';
+    const entryArrow=msSortBy==='entry'?(msSortDir==='asc'?' ▲':' ▼'):'';
+    const exitArrow=msSortBy==='exit'?(msSortDir==='asc'?' ▲':' ▼'):'';
     resHtml+=`<div class="tbl-wrap" style="margin-top:10px;">
       <div class="tbl-hdr">
         <span class="tbl-title">CHI TIẾT LỆNH GỘP — ${trades.length} lệnh</span>
@@ -1981,7 +2035,9 @@ function renderMultiSlot(){
       </div>
       <div class="tbl-scroll"><table>
         <thead><tr>
-          <th>#</th><th>Slot·Coin</th><th>T. vào</th><th>T. thoát</th>
+          <th>#</th><th>Slot·Coin</th>
+          <th onclick="setSortMs('entry')" style="${thStyle}">T. vào${entryArrow}</th>
+          <th onclick="setSortMs('exit')" style="${thStyle}">T. thoát${exitArrow}</th>
           <th>Hướng</th><th>Giá vào</th><th>RSI</th><th>PnL%</th><th>Net $</th><th>KQ</th>
         </tr></thead>
         <tbody>`;
