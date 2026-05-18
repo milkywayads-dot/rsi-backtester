@@ -1708,7 +1708,7 @@ async function runMultiSlot(){
       }
 
       const lookupFn=periodMs?(map,ts)=>getMacdHistIntraday(map,ts,periodMs):getMacdHist;
-      const maxOrd=parseInt(slot.maxOrders)||1;
+      const maxOrd=slot.maxOrders===0?0:(parseInt(slot.maxOrders)||1);
 
       // ── Long backtest (hist>0, RSI cắt lên) — chỉ chạy khi longEnabled
       const longTrades=slot.longEnabled!==false?backtestWithMacd(candles,'buy',startTs,endTs,
