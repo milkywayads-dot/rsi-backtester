@@ -266,8 +266,8 @@ function mkSlot(id){
     macdTf:'1d', rsiTf:'1h',
     macdAuto:true,
     longEnabled:true, shortEnabled:true,
-    long:{rsiPeriod:14, rsiLevel:55, tp:4, sl:2},
-    short:{rsiPeriod:14, rsiLevel:45, tp:4, sl:2}
+    long:{rsiPeriod:14, rsiLevel:55, tp:4, sl:2, macdAlign:'trend'},
+    short:{rsiPeriod:14, rsiLevel:45, tp:4, sl:2, macdAlign:'trend'}
   };
 }
 function addSlot(){
@@ -1780,7 +1780,7 @@ async function runMultiSlot(){
       const longTrades=slot.longEnabled!==false?(slot.macdAuto!==false
         ?backtestWithMacd(candles,'buy',startTs,endTs,
           parseFloat(slot.long.rsiLevel)||55,parseFloat(slot.long.tp)||4,parseFloat(slot.long.sl)||2,
-          maxOrd,parseInt(slot.long.rsiPeriod)||14,macdMap,'trend',lookupFn)
+          maxOrd,parseInt(slot.long.rsiPeriod)||14,macdMap,slot.long.macdAlign||'trend',lookupFn)
         :backtestNoMacd(candles,'buy',startTs,endTs,
           parseFloat(slot.long.rsiLevel)||55,parseFloat(slot.long.tp)||4,parseFloat(slot.long.sl)||2,
           maxOrd,parseInt(slot.long.rsiPeriod)||14)
@@ -1790,7 +1790,7 @@ async function runMultiSlot(){
       const shortTrades=slot.shortEnabled!==false?(slot.macdAuto!==false
         ?backtestWithMacd(candles,'sell',startTs,endTs,
           parseFloat(slot.short.rsiLevel)||45,parseFloat(slot.short.tp)||4,parseFloat(slot.short.sl)||2,
-          maxOrd,parseInt(slot.short.rsiPeriod)||14,macdMap,'trend',lookupFn)
+          maxOrd,parseInt(slot.short.rsiPeriod)||14,macdMap,slot.short.macdAlign||'trend',lookupFn)
         :backtestNoMacd(candles,'sell',startTs,endTs,
           parseFloat(slot.short.rsiLevel)||45,parseFloat(slot.short.tp)||4,parseFloat(slot.short.sl)||2,
           maxOrd,parseInt(slot.short.rsiPeriod)||14)
@@ -1978,7 +1978,16 @@ function renderMultiSlot(){
             <div><div style="font-size:10px;color:var(--grn);font-weight:700;letter-spacing:1.5px;margin-bottom:5px;">SL %</div>
               <input type="number" min="0.1" step="0.5" value="${slot.long.sl}" onchange="setSlotDir(${slot.id},'long','sl',parseFloat(this.value)||2)" style="text-align:center;border-color:var(--grn);">
             </div>
+          </div>
+          ${slot.macdAuto!==false?`
+          <div style="margin-top:9px;">
+            <div class="flbl">MACD Chiều</div>
+            <div style="display:flex;gap:6px;">
+              <button onclick="setSlotDir(${slot.id},'long','macdAlign','trend')" style="flex:1;padding:7px 4px;border-radius:7px;cursor:pointer;font:700 11px/1 'Outfit',sans-serif;transition:all .15s;background:${(slot.long.macdAlign||'trend')==='trend'?'rgba(22,163,74,.1)':'var(--bg0)'};border:1.5px solid ${(slot.long.macdAlign||'trend')==='trend'?'var(--grn)':'var(--b2)'};color:${(slot.long.macdAlign||'trend')==='trend'?'var(--grn)':'var(--dim)'};">Thuận chiều</button>
+              <button onclick="setSlotDir(${slot.id},'long','macdAlign','counter')" style="flex:1;padding:7px 4px;border-radius:7px;cursor:pointer;font:700 11px/1 'Outfit',sans-serif;transition:all .15s;background:${(slot.long.macdAlign||'trend')==='counter'?'rgba(249,115,22,.1)':'var(--bg0)'};border:1.5px solid ${(slot.long.macdAlign||'trend')==='counter'?'var(--ora)':'var(--b2)'};color:${(slot.long.macdAlign||'trend')==='counter'?'var(--ora)':'var(--dim)'};">Ngược chiều</button>
+            </div>
           </div>`:''}
+          `:''}
         </div>
 
         <div style="border:1.5px solid ${slot.shortEnabled!==false?'var(--red)':'var(--b2)'};border-radius:10px;padding:11px;background:${slot.shortEnabled!==false?'rgba(220,38,38,.04)':'var(--bg2)'};transition:all .15s;">
@@ -2007,7 +2016,16 @@ function renderMultiSlot(){
             <div><div style="font-size:10px;color:var(--red);font-weight:700;letter-spacing:1.5px;margin-bottom:5px;">SL %</div>
               <input type="number" min="0.1" step="0.5" value="${slot.short.sl}" onchange="setSlotDir(${slot.id},'short','sl',parseFloat(this.value)||2)" style="text-align:center;border-color:var(--red);">
             </div>
+          </div>
+          ${slot.macdAuto!==false?`
+          <div style="margin-top:9px;">
+            <div class="flbl">MACD Chiều</div>
+            <div style="display:flex;gap:6px;">
+              <button onclick="setSlotDir(${slot.id},'short','macdAlign','trend')" style="flex:1;padding:7px 4px;border-radius:7px;cursor:pointer;font:700 11px/1 'Outfit',sans-serif;transition:all .15s;background:${(slot.short.macdAlign||'trend')==='trend'?'rgba(220,38,38,.1)':'var(--bg0)'};border:1.5px solid ${(slot.short.macdAlign||'trend')==='trend'?'var(--red)':'var(--b2)'};color:${(slot.short.macdAlign||'trend')==='trend'?'var(--red)':'var(--dim)'};">Thuận chiều</button>
+              <button onclick="setSlotDir(${slot.id},'short','macdAlign','counter')" style="flex:1;padding:7px 4px;border-radius:7px;cursor:pointer;font:700 11px/1 'Outfit',sans-serif;transition:all .15s;background:${(slot.short.macdAlign||'trend')==='counter'?'rgba(249,115,22,.1)':'var(--bg0)'};border:1.5px solid ${(slot.short.macdAlign||'trend')==='counter'?'var(--ora)':'var(--b2)'};color:${(slot.short.macdAlign||'trend')==='counter'?'var(--ora)':'var(--dim)'};">Ngược chiều</button>
+            </div>
           </div>`:''}
+          `:''}
         </div>
 
       </div>
