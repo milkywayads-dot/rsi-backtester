@@ -264,7 +264,7 @@ function mkSlot(id){
     id, expanded:true,
     coin:'BTCUSDT', sizeUsd:10, leverage:10, maxOrders:1,
     macdTf:'1d', rsiTf:'1h',
-    macdAuto:true,
+    macdAuto:true, macdTrendTf:'none',
     longEnabled:true, shortEnabled:true,
     long:{rsiPeriod:14, rsiLevel:55, tp:4, sl:2, macdAlign:'trend'},
     short:{rsiPeriod:14, rsiLevel:45, tp:4, sl:2, macdAlign:'trend'}
@@ -313,7 +313,7 @@ function saveSlotConfig(slotId){
   const def=s.coin.replace('USDT','')+'_cfg';
   const name=(prompt('Tên cấu hình (VD: BTC1, ETH_15m):',def)||'').trim();
   if(!name) return;
-  const cfg={coin:s.coin,sizeUsd:s.sizeUsd,leverage:s.leverage,maxOrders:s.maxOrders,macdTf:s.macdTf,rsiTf:s.rsiTf,macdAuto:s.macdAuto!==false,long:{...s.long},short:{...s.short},longEnabled:s.longEnabled!==false,shortEnabled:s.shortEnabled!==false};
+  const cfg={coin:s.coin,sizeUsd:s.sizeUsd,leverage:s.leverage,maxOrders:s.maxOrders,macdTf:s.macdTf,rsiTf:s.rsiTf,macdAuto:s.macdAuto!==false,macdTrendTf:s.macdTrendTf||'none',long:{...s.long},short:{...s.short},longEnabled:s.longEnabled!==false,shortEnabled:s.shortEnabled!==false};
   const blob=new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
@@ -334,6 +334,7 @@ function loadSlotConfig(slotId,input){
       if(cfg.macdTf!==undefined) s.macdTf=cfg.macdTf;
       if(cfg.rsiTf!==undefined) s.rsiTf=cfg.rsiTf;
       if(cfg.macdAuto!==undefined) s.macdAuto=cfg.macdAuto;
+      if(cfg.macdTrendTf!==undefined) s.macdTrendTf=cfg.macdTrendTf;
       if(cfg.long) s.long={...s.long,...cfg.long};
       if(cfg.short) s.short={...s.short,...cfg.short};
       if(cfg.longEnabled!==undefined) s.longEnabled=cfg.longEnabled;
@@ -352,7 +353,7 @@ function mkSess(id){
     dir:'buy', rsiLevel:50,
     tp:3, sl:1.5, maxOrders:1, reverseMode:false, flipWindow:5,
     rsiPeriod:14, rsiTF:'1h',
-    macdTf:'none', macdAlign:'trend' };
+    macdTf:'none', macdAlign:'trend', macdTrendTf:'none' };
 }
 function todayStr(){
   const n=new Date();
@@ -626,12 +627,24 @@ async function runSession(){
           if(!rTf.ok) throw new Error(sym+': lỗi fetch MACD '+macdTf+' HTTP '+rTf.status);
           coinMacdMap=buildMacdMap(await rTf.json());
         }
+        // ── MACD Trend fetch (1D/3D/1W, chỉ khi Trading bật) ────────────────
+        let coinTrendMap=null;
+        const macdTrendTf=session.macdTrendTf||'none';
+        if(macdTrendTf!=='none'){
+          setStatus('⏳ '+sym+': tải MACD Trend '+macdTrendTf.toUpperCase()+'...');
+          const urlTrend=`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${macdTrendTf}&startTime=${startMacd}&endTime=${endTs}&limit=1000`;
+          const rTrend=await fetch(urlTrend);
+          if(!rTrend.ok) throw new Error(sym+': lỗi fetch MACD Trend '+macdTrendTf+' HTTP '+rTrend.status);
+          coinTrendMap=buildMacdMap(await rTrend.json());
+        }
+        const effectiveAlign=macdTrendTf!=='none'?'trend':macdAlign;
         trades=backtestWithMacd(candles,session.dir,startTs,endTs,
           parseFloat(session.rsiLevel)||50,
           parseFloat(session.tp)||3,
           parseFloat(session.sl)||1.5,
           parseInt(session.maxOrders)||0, rsiPeriod,
-          coinMacdMap, macdAlign, macdLookupFn);
+          coinMacdMap, effectiveAlign, macdLookupFn,
+          coinTrendMap, getMacdHist);
       }
 
       res[sym]=summarize(trades);
@@ -710,6 +723,7 @@ function renderConfig(){
   const rsiTF=s.rsiTF||'1h';
   const macdTf=s.macdTf||'none';
   const macdAlign=s.macdAlign||'trend';
+  const macdTrendTf=s.macdTrendTf||'none';
 
   document.getElementById('configCard').innerHTML=`
     <div style="margin-bottom:14px">
@@ -801,12 +815,12 @@ function renderConfig(){
 
     ${macdTf!=='none'?`
     <div style="margin-bottom:14px;">
-      <div class="flbl">Chiều MACD</div>
+      <div class="flbl">Chiều MACD Trading</div>
       <div style="display:flex;gap:8px;">
         ${[
           {val:'trend',  label:'Thuận chiều', desc:'Hist dương→BUY / âm→SELL', c:'var(--grn)'},
           {val:'counter',label:'Ngược chiều', desc:'Hist âm→BUY / dương→SELL', c:'var(--ora)'},
-        ].map(opt=>`
+        ].filter(opt=>macdTrendTf==='none'||opt.val==='trend').map(opt=>`
           <button onclick="setField(${s.id},'macdAlign','${opt.val}')" style="
             flex:1;padding:9px 6px;border-radius:8px;cursor:pointer;
             font:700 12px/1 'Outfit',sans-serif;transition:all .15s;
@@ -817,6 +831,27 @@ function renderConfig(){
             <span style="font-size:9px;font-weight:400;opacity:.7">${opt.desc}</span>
           </button>`).join('')}
       </div>
+    </div>
+    <div style="margin-bottom:14px;">
+      <div class="flbl">MACD Trend (xác nhận xu hướng · 1D/3D/1W)</div>
+      <div style="display:flex;gap:8px;">
+        ${[
+          {val:'none',label:'Tắt',      desc:'Không dùng', c:'var(--dim)'},
+          {val:'1d',  label:'Trend 1D', desc:'Nến 1 ngày', c:'var(--cyn)'},
+          {val:'3d',  label:'Trend 3D', desc:'Nến 3 ngày', c:'#7c3aed'},
+          {val:'1w',  label:'Trend 1W', desc:'Nến 1 tuần', c:'var(--acc)'},
+        ].map(opt=>`
+          <button onclick="setField(${s.id},'macdTrendTf','${opt.val}')" style="
+            flex:1;padding:9px 4px;border-radius:8px;cursor:pointer;
+            font:700 11px/1 'Outfit',sans-serif;transition:all .15s;
+            background:${macdTrendTf===opt.val?'rgba(79,70,229,.08)':'var(--bg0)'};
+            border:1.5px solid ${macdTrendTf===opt.val?opt.c:'var(--b2)'};
+            color:${macdTrendTf===opt.val?opt.c:'var(--dim)'};">
+            ${opt.label}<br>
+            <span style="font-size:9px;font-weight:400;opacity:.7">${opt.desc}</span>
+          </button>`).join('')}
+      </div>
+      ${macdTrendTf!=='none'?`<div style="font-size:10px;color:var(--ora);margin-top:5px;">⚡ MACD Trend BẬT — Ngược chiều bị ẩn · cả hai hist phải cùng hướng</div>`:''}
     </div>`:''}
 
     <div style="margin-bottom:14px">
@@ -1229,7 +1264,7 @@ function getMacdHistIntraday(macdMap, tsMs, periodMs){
 }
 
 // ── backtestWithMacd — lookupFn mặc định là getMacdHist (daily) ──────────────
-function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, maxOrders, rsiPeriod, macdMap, align='trend', lookupFn=getMacdHist){
+function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, maxOrders, rsiPeriod, macdMap, align='trend', lookupFn=getMacdHist, macdTrendMap=null, trendLookupFn=getMacdHist){
   const closes=candles.map(c=>parseFloat(c[4]));
   const highs =candles.map(c=>parseFloat(c[2]));
   const lows  =candles.map(c=>parseFloat(c[3]));
@@ -1257,6 +1292,14 @@ function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, 
     } else {
       if(dir==='buy'  && hist>=0) continue;
       if(dir==='sell' && hist<=0) continue;
+    }
+
+    // ── MACD Trend filter (xác nhận xu hướng, luôn thuận chiều) ─────────────
+    if(macdTrendMap!==null){
+      const th=trendLookupFn(macdTrendMap,times[i]);
+      if(th===null) continue;
+      if(dir==='buy'  && th<=0) continue;
+      if(dir==='sell' && th>=0) continue;
     }
 
     const entry=closes[i];
@@ -1305,6 +1348,7 @@ let optState = {
   maxOrders: 1,
   macdModes: ['1d'],
   alignModes: ['trend','counter'],
+  macdTrendModes: ['none'],
   sortBy: 'pnl',
   filterPeriod: null,
   filterDir: null,
@@ -1334,6 +1378,12 @@ function toggleMacdMode(tf){
   else optState.macdModes=[...optState.macdModes,tf];
   renderOptimizer();
 }
+function toggleTrendMode(tf){
+  const idx=optState.macdTrendModes.indexOf(tf);
+  if(idx>=0) optState.macdTrendModes=optState.macdTrendModes.filter(m=>m!==tf);
+  else optState.macdTrendModes=[...optState.macdTrendModes,tf];
+  renderOptimizer();
+}
 
 async function runOptimizer(){
   if(optState.running) return;
@@ -1349,7 +1399,12 @@ async function runOptimizer(){
 
   const hasNone=selectedTfs.includes('none');
   const tfMacd=selectedTfs.filter(t=>t!=='none');
-  const totalModes=(hasNone?1:0)+tfMacd.length;
+  const selectedTrendTfs=(optState.macdTrendModes||['none']).filter(m=>m!=='none');
+  const hasTrendNone=(optState.macdTrendModes||['none']).includes('none');
+  const alN=(optState.alignModes||['trend']).length;
+  const modesNoTrend=hasTrendNone?((hasNone?1:0)+tfMacd.length*alN):0;
+  const modesWithTrend=tfMacd.length*selectedTrendTfs.length;
+  const totalModes=modesNoTrend+modesWithTrend;
   const combos=OPT_RSI_PERIODS.length*OPT_RSI.length*OPT_TP.length*OPT_SL.length*OPT_DIRS.length*totalModes;
   optState.total=combos;
   const rsiTFLabel=(optState.rsiTF||'1h').toUpperCase();
@@ -1362,21 +1417,30 @@ async function runOptimizer(){
   try{
     candles1H=await fetchKlines(optState.coin,startTs,endTs,optState.rsiTF||'1h');
     for(const tf of tfMacd){
-      optState.statusMsg=`Đang tải nến ${tf.toUpperCase()} (MACD)...`;
+      optState.statusMsg=`Đang tải nến ${tf.toUpperCase()} (MACD Trading)...`;
       renderOptimizer();
       const startD=startTs-60*86400000;
       const periodMs=MACD_INTRADAY_MS[tf];
       if(periodMs){
-        // Intraday: fetch trực tiếp từ Binance, dùng periodKey làm map key
         const raw=await fetchKlines(optState.coin,startD,endTs,tf);
         macdMapByTf[tf]=buildMacdMapIntraday(raw,periodMs);
       } else {
-        // Daily/Weekly/3Day: fetch trực tiếp từ Binance, dùng dayKey làm map key
         const urlTf=`https://api.binance.com/api/v3/klines?symbol=${optState.coin}&interval=${tf}&startTime=${startD}&endTime=${endTs}&limit=1000`;
         const rTf=await fetch(urlTf);
         if(!rTf.ok) throw new Error(`Lỗi fetch ${tf}: ${rTf.status}`);
         macdMapByTf[tf]=buildMacdMap(await rTf.json());
       }
+    }
+    // ── MACD Trend maps (1D/3D/1W) ────────────────────────────────────────────
+    const macdTrendMapByTf={};
+    for(const tf of selectedTrendTfs){
+      optState.statusMsg=`Đang tải nến ${tf.toUpperCase()} (MACD Trend)...`;
+      renderOptimizer();
+      const startD=startTs-60*86400000;
+      const urlTrend=`https://api.binance.com/api/v3/klines?symbol=${optState.coin}&interval=${tf}&startTime=${startD}&endTime=${endTs}&limit=1000`;
+      const rTrend=await fetch(urlTrend);
+      if(!rTrend.ok) throw new Error(`Lỗi fetch Trend ${tf}: ${rTrend.status}`);
+      macdTrendMapByTf[tf]=buildMacdMap(await rTrend.json());
     }
   }catch(e){
     optState.statusMsg='❌ Lỗi: '+e.message;
@@ -1388,16 +1452,29 @@ async function runOptimizer(){
   renderOptimizer();
 
   const res=[];let done=0;
-  const modes=[];
-  if(hasNone) modes.push({key:'none',label:'none',tf:null,align:'trend',periodMs:null});
-  for(const tf of tfMacd){
-    const periodMs=MACD_INTRADAY_MS[tf]||null;
-    for(const align of (optState.alignModes||['trend'])){
-      modes.push({key:tf+'_'+align,label:'macd',tf,align,periodMs});
+
+  // ── Build combo modes: [tradingMode, trendTf] pairs ──────────────────────
+  const comboPairs=[];
+  // Without MACD Trend (trendTf=null)
+  if(hasTrendNone){
+    if(hasNone) comboPairs.push({trading:{key:'none',label:'none',tf:null,align:'trend',periodMs:null},trendTf:null});
+    for(const tf of tfMacd){
+      const periodMs=MACD_INTRADAY_MS[tf]||null;
+      for(const align of (optState.alignModes||['trend'])){
+        comboPairs.push({trading:{key:tf+'_'+align,label:'macd',tf,align,periodMs},trendTf:null});
+      }
+    }
+  }
+  // With MACD Trend (trendTf set, align forced to 'trend')
+  for(const trendTf of selectedTrendTfs){
+    for(const tf of tfMacd){
+      const periodMs=MACD_INTRADAY_MS[tf]||null;
+      comboPairs.push({trading:{key:tf+'_trend+'+trendTf,label:'macd',tf,align:'trend',periodMs},trendTf});
     }
   }
 
-  for(const mode of modes){
+  for(const {trading:mode, trendTf} of comboPairs){
+    const trendMap=trendTf?macdTrendMapByTf[trendTf]:null;
     for(const period of OPT_RSI_PERIODS){
       for(const dir of OPT_DIRS){
         for(const rsi of OPT_RSI){
@@ -1410,12 +1487,16 @@ async function runOptimizer(){
                 const lookupFn=mode.periodMs
                   ?(map,ts)=>getMacdHistIntraday(map,ts,mode.periodMs)
                   :getMacdHist;
-                trades=backtestWithMacd(candles1H,dir,startTs,endTs,rsi,tp,sl,optState.maxOrders,period,macdMapByTf[mode.tf],mode.align,lookupFn);
+                trades=backtestWithMacd(candles1H,dir,startTs,endTs,rsi,tp,sl,optState.maxOrders,period,
+                  macdMapByTf[mode.tf],mode.align,lookupFn,
+                  trendMap,getMacdHist);
               }
               const sum=summarize(trades);
               const wr=sum.closed>0?sum.wins/sum.closed*100:0;
               if(sum.closed>=optState.minTrades&&wr>=optState.minWR&&sum.totalPnl>=optState.minPnl){
-                res.push({macdMode:mode.key,macdTf:mode.tf||'none',align:mode.align,period,dir,rsi,tp,sl,
+                res.push({macdMode:mode.key,macdTf:mode.tf||'none',align:mode.align,
+                  macdTrendTf:trendTf||'none',
+                  period,dir,rsi,tp,sl,
                   trades:sum.closed,wins:sum.wins,losses:sum.losses,
                   wr:parseFloat(wr.toFixed(1)),pnl:parseFloat(sum.totalPnl.toFixed(2))});
               }
@@ -1575,24 +1656,56 @@ function renderOptimizer(){
             const hasN=sel.includes('none');
             const tfN=sel.filter(t=>t!=='none').length;
             const alN=(o.alignModes||['trend']).length;
-            const modes=(hasN?1:0)+tfN*alN;
-            return (OPT_RSI_PERIODS.length*OPT_RSI.length*OPT_TP.length*OPT_SL.length*OPT_DIRS.length*modes).toLocaleString();
+            const trendTfs=(o.macdTrendModes||['none']).filter(m=>m!=='none');
+            const hasTrendNone=(o.macdTrendModes||['none']).includes('none');
+            // trading combos without trend: (none_mode + tfN*alN) × hasTrendNone
+            const modesNoTrend=hasTrendNone?((hasN?1:0)+tfN*alN):0;
+            // trading combos with trend: tfN × trendTfs.length (align forced to 1)
+            const modesWithTrend=tfN*trendTfs.length;
+            const totalModes=modesNoTrend+modesWithTrend;
+            return (OPT_RSI_PERIODS.length*OPT_RSI.length*OPT_TP.length*OPT_SL.length*OPT_DIRS.length*totalModes).toLocaleString();
           })()
         }</span>
       </div>
     </div>
 
     <div style="margin-bottom:14px;">
-      <div style="font-size:10px;color:var(--acc);font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">CHIỀU MACD (thuận / ngược xu hướng)</div>
+      <div style="font-size:10px;color:var(--acc);font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">CHIỀU MACD Trading</div>
       <div style="display:flex;gap:7px;">
+        ${(()=>{
+          const hasTrend=(o.macdTrendModes||['none']).some(m=>m!=='none');
+          return [
+            {val:'trend',  label:'Thuận chiều',desc:'Hist dương→BUY / âm→SELL',c:'var(--grn)'},
+            {val:'counter',label:'Ngược chiều',desc:'Hist âm→BUY / dương→SELL',c:'var(--ora)'},
+          ].filter(opt=>!hasTrend||opt.val==='trend').map(opt=>{
+            const on=(o.alignModes||['trend']).includes(opt.val);
+            return `<button onclick="toggleAlignMode('${opt.val}')" style="
+              flex:1;padding:8px 6px;border-radius:8px;cursor:pointer;
+              font:700 12px/1 'Outfit',sans-serif;transition:all .15s;
+              background:${on?'rgba(79,70,229,.08)':'var(--bg0)'};
+              border:1.5px solid ${on?opt.c:'var(--b2)'};
+              color:${on?opt.c:'var(--dim)'};">
+              ${on?'☑':'☐'} ${opt.label}<br>
+              <span style="font-size:9px;font-weight:400;opacity:.7">${opt.desc}</span>
+            </button>`;
+          }).join('');
+        })()}
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px;">
+      <div style="font-size:10px;color:var(--acc);font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">MACD TREND (xác nhận xu hướng · 1D/3D/1W)</div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;">
         ${[
-          {val:'trend',  label:'Thuận chiều',desc:'Hist dương→BUY / âm→SELL',c:'var(--grn)'},
-          {val:'counter',label:'Ngược chiều',desc:'Hist âm→BUY / dương→SELL',c:'var(--ora)'},
+          {val:'none',label:'Tắt',      desc:'Không dùng', c:'var(--dim)'},
+          {val:'1d',  label:'Trend 1D', desc:'Nến 1 ngày', c:'var(--cyn)'},
+          {val:'3d',  label:'Trend 3D', desc:'Nến 3 ngày', c:'#7c3aed'},
+          {val:'1w',  label:'Trend 1W', desc:'Nến 1 tuần', c:'var(--acc)'},
         ].map(opt=>{
-          const on=(o.alignModes||['trend']).includes(opt.val);
-          return `<button onclick="toggleAlignMode('${opt.val}')" style="
-            flex:1;padding:8px 6px;border-radius:8px;cursor:pointer;
-            font:700 12px/1 'Outfit',sans-serif;transition:all .15s;
+          const on=(o.macdTrendModes||['none']).includes(opt.val);
+          return `<button onclick="toggleTrendMode('${opt.val}')" style="
+            flex:1;padding:8px 4px;border-radius:8px;cursor:pointer;
+            font:700 11px/1 'Outfit',sans-serif;transition:all .15s;
             background:${on?'rgba(79,70,229,.08)':'var(--bg0)'};
             border:1.5px solid ${on?opt.c:'var(--b2)'};
             color:${on?opt.c:'var(--dim)'};">
@@ -1601,6 +1714,7 @@ function renderOptimizer(){
           </button>`;
         }).join('')}
       </div>
+      ${(o.macdTrendModes||['none']).some(m=>m!=='none')?`<div style="font-size:10px;color:var(--ora);margin-top:5px;">⚡ MACD Trend BẬT — Ngược chiều bị ẩn · cả hai hist phải cùng hướng</div>`:''}
     </div>
 
     ${o.running?`
@@ -1658,7 +1772,7 @@ function renderOptimizer(){
       </div>
       <div class="tbl-scroll"><table>
         <thead><tr>
-          <th>#</th><th>MACD</th><th>Period</th><th>Hướng</th>
+          <th>#</th><th>Trading</th><th>Trend</th><th>Period</th><th>Hướng</th>
           <th>RSI Lv</th><th>TP%</th><th>SL%</th><th>R:R</th>
           <th>Lệnh</th><th>WIN</th><th>LOSS</th><th>WinRate</th><th>PnL</th><th>Net PnL</th>
         </tr></thead>
@@ -1680,9 +1794,14 @@ function renderOptimizer(){
               const c=r.align==='trend'?'var(--cyn)':'var(--ora)';
               return `<span style="color:${c};font-weight:700">${tf} ${arrow}</span>`;
             })();
+            const trendLabel=(()=>{
+              if(!r.macdTrendTf||r.macdTrendTf==='none') return '<span style="color:var(--dim)">—</span>';
+              return `<span style="color:var(--acc);font-weight:700">${r.macdTrendTf.toUpperCase()}</span>`;
+            })();
             return `<tr>
               <td style="color:var(--dim)">${i+1}</td>
               <td>${macdLabel}</td>
+              <td>${trendLabel}</td>
               <td style="color:var(--acc);font-weight:700">${r.period}</td>
               <td style="color:${dc};font-weight:700">${r.dir==='buy'?'▲ BUY':'▼ SELL'}</td>
               <td style="color:var(--acc)">${r.rsi}</td>
@@ -1756,9 +1875,10 @@ async function runMultiSlot(){
       setMultiStatus('⏳ '+sym+': tải nến RSI '+slot.rsiTf.toUpperCase()+'...');
       const candles=await fetchKlines(sym,startTs,endTs,slot.rsiTf);
 
-      let macdMap=null, lookupFn=null;
+      let macdMap=null, lookupFn=null, trendMap=null;
+      const slotTrendTf=slot.macdTrendTf||'none';
       if(slot.macdAuto!==false){
-        setMultiStatus('⏳ '+sym+': tải MACD '+slot.macdTf.toUpperCase()+'...');
+        setMultiStatus('⏳ '+sym+': tải MACD Trading '+slot.macdTf.toUpperCase()+'...');
         const startMacd=startTs-60*86400000;
         const periodMs=MACD_INTRADAY_MS[slot.macdTf];
         if(periodMs){
@@ -1772,15 +1892,28 @@ async function runMultiSlot(){
         }
         const periodMs2=MACD_INTRADAY_MS[slot.macdTf];
         lookupFn=periodMs2?(map,ts)=>getMacdHistIntraday(map,ts,periodMs2):getMacdHist;
+        // ── MACD Trend fetch (chỉ khi Trading bật) ───────────────────────────
+        if(slotTrendTf!=='none'){
+          setMultiStatus('⏳ '+sym+': tải MACD Trend '+slotTrendTf.toUpperCase()+'...');
+          const startMacd2=startTs-60*86400000;
+          const urlTrend=`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${slotTrendTf}&startTime=${startMacd2}&endTime=${endTs}&limit=1000`;
+          const rTrend=await fetch(urlTrend);
+          if(!rTrend.ok) throw new Error(sym+': lỗi MACD Trend '+slotTrendTf+' HTTP '+rTrend.status);
+          trendMap=buildMacdMap(await rTrend.json());
+        }
       }
 
       const maxOrd=slot.maxOrders===0?0:(parseInt(slot.maxOrders)||1);
+      // Khi Trend bật: force Thuận chiều cho cả Long và Short
+      const longAlign=slotTrendTf!=='none'?'trend':(slot.long.macdAlign||'trend');
+      const shortAlign=slotTrendTf!=='none'?'trend':(slot.short.macdAlign||'trend');
 
       // ── Long backtest — chỉ chạy khi longEnabled
       const longTrades=slot.longEnabled!==false?(slot.macdAuto!==false
         ?backtestWithMacd(candles,'buy',startTs,endTs,
           parseFloat(slot.long.rsiLevel)||55,parseFloat(slot.long.tp)||4,parseFloat(slot.long.sl)||2,
-          maxOrd,parseInt(slot.long.rsiPeriod)||14,macdMap,slot.long.macdAlign||'trend',lookupFn)
+          maxOrd,parseInt(slot.long.rsiPeriod)||14,macdMap,longAlign,lookupFn,
+          trendMap,getMacdHist)
         :backtestNoMacd(candles,'buy',startTs,endTs,
           parseFloat(slot.long.rsiLevel)||55,parseFloat(slot.long.tp)||4,parseFloat(slot.long.sl)||2,
           maxOrd,parseInt(slot.long.rsiPeriod)||14)
@@ -1790,7 +1923,8 @@ async function runMultiSlot(){
       const shortTrades=slot.shortEnabled!==false?(slot.macdAuto!==false
         ?backtestWithMacd(candles,'sell',startTs,endTs,
           parseFloat(slot.short.rsiLevel)||45,parseFloat(slot.short.tp)||4,parseFloat(slot.short.sl)||2,
-          maxOrd,parseInt(slot.short.rsiPeriod)||14,macdMap,slot.short.macdAlign||'trend',lookupFn)
+          maxOrd,parseInt(slot.short.rsiPeriod)||14,macdMap,shortAlign,lookupFn,
+          trendMap,getMacdHist)
         :backtestNoMacd(candles,'sell',startTs,endTs,
           parseFloat(slot.short.rsiLevel)||45,parseFloat(slot.short.tp)||4,parseFloat(slot.short.sl)||2,
           maxOrd,parseInt(slot.short.rsiPeriod)||14)
@@ -1924,7 +2058,7 @@ function renderMultiSlot(){
               </button>
             </div>
             ${slot.macdAuto!==false?`
-            <div style="display:flex;gap:5px;flex-wrap:wrap;">
+            <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px;">
               ${['1h','2h','4h','1d','3d','1w'].map(tf=>`
                 <button onclick="setSlot(${slot.id},'macdTf','${tf}')" style="
                   flex:1;min-width:28%;padding:7px 2px;border-radius:7px;cursor:pointer;
@@ -1933,7 +2067,19 @@ function renderMultiSlot(){
                   border:1.5px solid ${slot.macdTf===tf?'var(--cyn)':'var(--b2)'};
                   color:${slot.macdTf===tf?'var(--cyn)':'var(--dim)'};">
                   ${tf.toUpperCase()}</button>`).join('')}
-            </div>`
+            </div>
+            <div class="flbl" style="margin-bottom:5px;">MACD Trend</div>
+            <div style="display:flex;gap:5px;flex-wrap:wrap;">
+              ${['none','1d','3d','1w'].map(tf=>`
+                <button onclick="setSlot(${slot.id},'macdTrendTf','${tf}')" style="
+                  flex:1;padding:6px 2px;border-radius:7px;cursor:pointer;
+                  font:700 10px/1 'Outfit',sans-serif;transition:all .15s;
+                  background:${(slot.macdTrendTf||'none')===tf?'rgba(79,70,229,.1)':'var(--bg0)'};
+                  border:1.5px solid ${(slot.macdTrendTf||'none')===tf?(tf==='none'?'var(--dim)':tf==='1d'?'var(--cyn)':tf==='3d'?'#7c3aed':'var(--acc)'):'var(--b2)'};
+                  color:${(slot.macdTrendTf||'none')===tf?(tf==='none'?'var(--dim)':tf==='1d'?'var(--cyn)':tf==='3d'?'#7c3aed':'var(--acc)'):'var(--dim)'};">
+                  ${tf==='none'?'Tắt':tf.toUpperCase()}</button>`).join('')}
+            </div>
+            ${(slot.macdTrendTf||'none')!=='none'?`<div style="font-size:10px;color:var(--ora);margin-top:4px;">⚡ Trend BẬT — Ngược chiều bị ẩn</div>`:''}`
             :`<div style="font-size:11px;color:var(--dim);padding:6px 0;">RSI thuần — không lọc MACD</div>`}
           </div>
         </div>
@@ -1984,7 +2130,7 @@ function renderMultiSlot(){
             <div class="flbl">MACD Chiều</div>
             <div style="display:flex;gap:6px;">
               <button onclick="setSlotDir(${slot.id},'long','macdAlign','trend')" style="flex:1;padding:7px 4px;border-radius:7px;cursor:pointer;font:700 11px/1 'Outfit',sans-serif;transition:all .15s;background:${(slot.long.macdAlign||'trend')==='trend'?'rgba(22,163,74,.1)':'var(--bg0)'};border:1.5px solid ${(slot.long.macdAlign||'trend')==='trend'?'var(--grn)':'var(--b2)'};color:${(slot.long.macdAlign||'trend')==='trend'?'var(--grn)':'var(--dim)'};">Thuận chiều</button>
-              <button onclick="setSlotDir(${slot.id},'long','macdAlign','counter')" style="flex:1;padding:7px 4px;border-radius:7px;cursor:pointer;font:700 11px/1 'Outfit',sans-serif;transition:all .15s;background:${(slot.long.macdAlign||'trend')==='counter'?'rgba(249,115,22,.1)':'var(--bg0)'};border:1.5px solid ${(slot.long.macdAlign||'trend')==='counter'?'var(--ora)':'var(--b2)'};color:${(slot.long.macdAlign||'trend')==='counter'?'var(--ora)':'var(--dim)'};">Ngược chiều</button>
+              ${(slot.macdTrendTf||'none')==='none'?`<button onclick="setSlotDir(${slot.id},'long','macdAlign','counter')" style="flex:1;padding:7px 4px;border-radius:7px;cursor:pointer;font:700 11px/1 'Outfit',sans-serif;transition:all .15s;background:${(slot.long.macdAlign||'trend')==='counter'?'rgba(249,115,22,.1)':'var(--bg0)'};border:1.5px solid ${(slot.long.macdAlign||'trend')==='counter'?'var(--ora)':'var(--b2)'};color:${(slot.long.macdAlign||'trend')==='counter'?'var(--ora)':'var(--dim)'};">Ngược chiều</button>`:''}
             </div>
           </div>`:''}
           `:''}
@@ -2022,7 +2168,7 @@ function renderMultiSlot(){
             <div class="flbl">MACD Chiều</div>
             <div style="display:flex;gap:6px;">
               <button onclick="setSlotDir(${slot.id},'short','macdAlign','trend')" style="flex:1;padding:7px 4px;border-radius:7px;cursor:pointer;font:700 11px/1 'Outfit',sans-serif;transition:all .15s;background:${(slot.short.macdAlign||'trend')==='trend'?'rgba(220,38,38,.1)':'var(--bg0)'};border:1.5px solid ${(slot.short.macdAlign||'trend')==='trend'?'var(--red)':'var(--b2)'};color:${(slot.short.macdAlign||'trend')==='trend'?'var(--red)':'var(--dim)'};">Thuận chiều</button>
-              <button onclick="setSlotDir(${slot.id},'short','macdAlign','counter')" style="flex:1;padding:7px 4px;border-radius:7px;cursor:pointer;font:700 11px/1 'Outfit',sans-serif;transition:all .15s;background:${(slot.short.macdAlign||'trend')==='counter'?'rgba(249,115,22,.1)':'var(--bg0)'};border:1.5px solid ${(slot.short.macdAlign||'trend')==='counter'?'var(--ora)':'var(--b2)'};color:${(slot.short.macdAlign||'trend')==='counter'?'var(--ora)':'var(--dim)'};">Ngược chiều</button>
+              ${(slot.macdTrendTf||'none')==='none'?`<button onclick="setSlotDir(${slot.id},'short','macdAlign','counter')" style="flex:1;padding:7px 4px;border-radius:7px;cursor:pointer;font:700 11px/1 'Outfit',sans-serif;transition:all .15s;background:${(slot.short.macdAlign||'trend')==='counter'?'rgba(249,115,22,.1)':'var(--bg0)'};border:1.5px solid ${(slot.short.macdAlign||'trend')==='counter'?'var(--ora)':'var(--b2)'};color:${(slot.short.macdAlign||'trend')==='counter'?'var(--ora)':'var(--dim)'};">Ngược chiều</button>`:''}
             </div>
           </div>`:''}
           `:''}
