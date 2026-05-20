@@ -1413,6 +1413,7 @@ async function runOptimizer(){
 
   let candles1H;
   const macdMapByTf={};
+  const macdTrendMapByTf={};
 
   try{
     candles1H=await fetchKlines(optState.coin,startTs,endTs,optState.rsiTF||'1h');
@@ -1432,7 +1433,6 @@ async function runOptimizer(){
       }
     }
     // ── MACD Trend maps (1D/3D/1W) ────────────────────────────────────────────
-    const macdTrendMapByTf={};
     for(const tf of selectedTrendTfs){
       optState.statusMsg=`Đang tải nến ${tf.toUpperCase()} (MACD Trend)...`;
       renderOptimizer();
