@@ -1349,6 +1349,8 @@ let optState = {
   macdModes: ['1d'],
   alignModes: ['trend','counter'],
   macdTrendModes: ['none'],
+  consecLossOn: false,
+  consecLoss: 5,
   sortBy: 'pnl',
   filterPeriod: null,
   filterDir: null,
@@ -1383,6 +1385,14 @@ function toggleTrendMode(tf){
   if(idx>=0) optState.macdTrendModes=optState.macdTrendModes.filter(m=>m!==tf);
   else optState.macdTrendModes=[...optState.macdTrendModes,tf];
   renderOptimizer();
+}
+function maxConsecLosses(trades){
+  let max=0,cur=0;
+  for(const t of trades){
+    if(t.result==='LOSS'){cur++;if(cur>max)max=cur;}
+    else if(t.result==='WIN') cur=0;
+  }
+  return max;
 }
 
 async function runOptimizer(){
@@ -1493,7 +1503,9 @@ async function runOptimizer(){
               }
               const sum=summarize(trades);
               const wr=sum.closed>0?sum.wins/sum.closed*100:0;
-              if(sum.closed>=optState.minTrades&&wr>=optState.minWR&&sum.totalPnl>=optState.minPnl){
+              const mcl=optState.consecLossOn?maxConsecLosses(trades):0;
+              if(sum.closed>=optState.minTrades&&wr>=optState.minWR&&sum.totalPnl>=optState.minPnl
+                 &&(!optState.consecLossOn||mcl<=optState.consecLoss)){
                 res.push({macdMode:mode.key,macdTf:mode.tf||'none',align:mode.align,
                   macdTrendTf:trendTf||'none',
                   period,dir,rsi,tp,sl,
@@ -1715,6 +1727,30 @@ function renderOptimizer(){
         }).join('')}
       </div>
       ${(o.macdTrendModes||['none']).some(m=>m!=='none')?`<div style="font-size:10px;color:var(--ora);margin-top:5px;">⚡ MACD Trend BẬT — Ngược chiều bị ẩn · cả hai hist phải cùng hướng</div>`:''}
+    </div>
+
+    <div style="background:var(--bg1);border:1px solid var(--b2);border-radius:10px;padding:12px 14px;margin-bottom:10px;">
+      <div style="font-size:10px;font-weight:700;letter-spacing:1px;color:var(--dim);margin-bottom:8px;">LỆNH ÂM LIÊN TIẾP TỐI ĐA</div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <button onclick="optState.consecLossOn=!optState.consecLossOn;renderOptimizer();" style="
+          padding:7px 14px;border-radius:8px;cursor:pointer;
+          font:700 11px/1 'Outfit',sans-serif;transition:all .15s;
+          background:${o.consecLossOn?'rgba(239,68,68,.12)':'var(--bg0)'};
+          border:1.5px solid ${o.consecLossOn?'var(--red)':'var(--b2)'};
+          color:${o.consecLossOn?'var(--red)':'var(--dim)'};">
+          ${o.consecLossOn?'🔴 BẬT':'⬜ TẮT'}
+        </button>
+        ${o.consecLossOn?`
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="font-size:11px;color:var(--dim);">Không âm quá</span>
+          <input type="number" min="1" max="99" value="${o.consecLoss}"
+            oninput="optState.consecLoss=Math.max(1,parseInt(this.value)||1);renderOptimizer();"
+            style="width:52px;padding:5px 8px;border-radius:6px;border:1.5px solid var(--red);
+                   background:var(--bg0);color:var(--red);font:700 13px 'Outfit',sans-serif;text-align:center;">
+          <span style="font-size:11px;color:var(--dim);">lệnh liên tiếp</span>
+        </div>
+        `:'<span style="font-size:11px;color:var(--dim);opacity:.5;">Không giới hạn chuỗi âm</span>'}
+      </div>
     </div>
 
     ${o.running?`
