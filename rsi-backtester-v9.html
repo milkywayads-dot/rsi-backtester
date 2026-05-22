@@ -303,10 +303,10 @@ function setSortMs(by){
   renderMultiSlot();
 }
 function parseExitKey(str){
-  if(!str||str==='—') return 9999999999;
-  const m=str.match(/^(\d+)\/(\d+)\s+(\d+):(\d+)$/);
-  if(!m) return 9999999999;
-  return parseInt(m[2])*1000000+parseInt(m[1])*10000+parseInt(m[3])*100+parseInt(m[4]);
+  if(!str||str==='—') return 9999999999999;
+  const m=str.match(/^(\d+)\/(\d+)\/(\d+)\s+(\d+):(\d+)$/);
+  if(!m) return 9999999999999;
+  return parseInt(m[3])*100000000+parseInt(m[2])*1000000+parseInt(m[1])*10000+parseInt(m[4])*100+parseInt(m[5]);
 }
 function saveSlotConfig(slotId){
   const s=slots.find(x=>x.id===slotId);if(!s) return;
@@ -422,10 +422,10 @@ function backtest(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, maxOrder
 
     const d=new Date(times[i]);
     const exitTime = exitBar>0
-      ? (()=>{ const e=new Date(times[exitBar]); return pad(e.getDate())+'/'+pad(e.getMonth()+1)+' '+pad(e.getHours())+':'+pad(e.getMinutes()); })()
+      ? (()=>{ const e=new Date(times[exitBar]); return pad(e.getDate())+'/'+pad(e.getMonth()+1)+'/'+String(e.getFullYear()).slice(-2)+' '+pad(e.getHours())+':'+pad(e.getMinutes()); })()
       : '—';
     trades.push({
-      time:pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes()),
+      time:pad(d.getDate())+'/'+pad(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(-2)+' '+pad(d.getHours())+':'+pad(d.getMinutes()),
       exitTime,
       entry:entry>100?entry.toFixed(2):entry.toFixed(4),
       rsi:rsi[i].toFixed(2),
@@ -489,7 +489,7 @@ function backtestReverse(candles, startDir, startTs, endTs, rsiLevel, tpPct, slP
 
     const d=new Date(times[i]);
     trades.push({
-      time:pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes()),
+      time:pad(d.getDate())+'/'+pad(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(-2)+' '+pad(d.getHours())+':'+pad(d.getMinutes()),
       entry:entry>100?entry.toFixed(2):entry.toFixed(4),
       rsi:rsi[i].toFixed(2), dir:curDir, result, pnl
     });
@@ -1319,10 +1319,10 @@ function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, 
     if(maxOrders>0) openExitBars.push(exitBar>0?exitBar:candles.length);
     const d=new Date(times[i]);
     const exitTime=exitBar>0
-      ?(()=>{const e=new Date(times[exitBar]);return pad(e.getDate())+'/'+pad(e.getMonth()+1)+' '+pad(e.getHours())+':'+pad(e.getMinutes());})()
+      ?(()=>{const e=new Date(times[exitBar]);return pad(e.getDate())+'/'+pad(e.getMonth()+1)+'/'+String(e.getFullYear()).slice(-2)+' '+pad(e.getHours())+':'+pad(e.getMinutes());})()
       :'—';
     trades.push({
-      time:pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes()),
+      time:pad(d.getDate())+'/'+pad(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(-2)+' '+pad(d.getHours())+':'+pad(d.getMinutes()),
       exitTime,
       rawTs:times[i],
       entry:entry>100?entry.toFixed(2):entry.toFixed(4),
@@ -1880,7 +1880,7 @@ function backtestNoMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, ma
   const timeLookup=new Map();
   candles.forEach(c=>{
     const d=new Date(c[0]);
-    const key=pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes());
+    const key=pad(d.getDate())+'/'+pad(d.getMonth()+1)+'/'+String(d.getFullYear()).slice(-2)+' '+pad(d.getHours())+':'+pad(d.getMinutes());
     if(!timeLookup.has(key)) timeLookup.set(key,c[0]);
   });
   trades.forEach(t=>{t.rawTs=timeLookup.get(t.time)||0;});
