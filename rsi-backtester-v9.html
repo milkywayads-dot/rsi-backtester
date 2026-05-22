@@ -622,20 +622,16 @@ async function runSession(){
           const raw=await fetchKlines(sym,startMacd,endTs,macdTf);
           coinMacdMap=buildMacdMapIntraday(raw,periodMs);
         } else {
-          const urlTf=`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${macdTf}&startTime=${startMacd}&endTime=${endTs}&limit=1000`;
-          const rTf=await fetch(urlTf);
-          if(!rTf.ok) throw new Error(sym+': lỗi fetch MACD '+macdTf+' HTTP '+rTf.status);
-          coinMacdMap=buildMacdMap(await rTf.json());
+          const raw=await fetchKlines(sym,startMacd,endTs,macdTf);
+          coinMacdMap=buildMacdMap(raw);
         }
         // ── MACD Trend fetch (1D/3D/1W, chỉ khi Trading bật) ────────────────
         let coinTrendMap=null;
         const macdTrendTf=session.macdTrendTf||'none';
         if(macdTrendTf!=='none'){
           setStatus('⏳ '+sym+': tải MACD Trend '+macdTrendTf.toUpperCase()+'...');
-          const urlTrend=`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${macdTrendTf}&startTime=${startMacd}&endTime=${endTs}&limit=1000`;
-          const rTrend=await fetch(urlTrend);
-          if(!rTrend.ok) throw new Error(sym+': lỗi fetch MACD Trend '+macdTrendTf+' HTTP '+rTrend.status);
-          coinTrendMap=buildMacdMap(await rTrend.json());
+          const rawTrend=await fetchKlines(sym,startMacd,endTs,macdTrendTf);
+          coinTrendMap=buildMacdMap(rawTrend);
         }
         const effectiveAlign=macdTrendTf!=='none'?'trend':macdAlign;
         trades=backtestWithMacd(candles,session.dir,startTs,endTs,
@@ -1436,10 +1432,8 @@ async function runOptimizer(){
         const raw=await fetchKlines(optState.coin,startD,endTs,tf);
         macdMapByTf[tf]=buildMacdMapIntraday(raw,periodMs);
       } else {
-        const urlTf=`https://api.binance.com/api/v3/klines?symbol=${optState.coin}&interval=${tf}&startTime=${startD}&endTime=${endTs}&limit=1000`;
-        const rTf=await fetch(urlTf);
-        if(!rTf.ok) throw new Error(`Lỗi fetch ${tf}: ${rTf.status}`);
-        macdMapByTf[tf]=buildMacdMap(await rTf.json());
+        const raw=await fetchKlines(optState.coin,startD,endTs,tf);
+        macdMapByTf[tf]=buildMacdMap(raw);
       }
     }
     // ── MACD Trend maps (1D/3D/1W) ────────────────────────────────────────────
@@ -1447,10 +1441,8 @@ async function runOptimizer(){
       optState.statusMsg=`Đang tải nến ${tf.toUpperCase()} (MACD Trend)...`;
       renderOptimizer();
       const startD=startTs-60*86400000;
-      const urlTrend=`https://api.binance.com/api/v3/klines?symbol=${optState.coin}&interval=${tf}&startTime=${startD}&endTime=${endTs}&limit=1000`;
-      const rTrend=await fetch(urlTrend);
-      if(!rTrend.ok) throw new Error(`Lỗi fetch Trend ${tf}: ${rTrend.status}`);
-      macdTrendMapByTf[tf]=buildMacdMap(await rTrend.json());
+      const rawTrend=await fetchKlines(optState.coin,startD,endTs,tf);
+      macdTrendMapByTf[tf]=buildMacdMap(rawTrend);
     }
   }catch(e){
     optState.statusMsg='❌ Lỗi: '+e.message;
@@ -1921,10 +1913,8 @@ async function runMultiSlot(){
           const raw=await fetchKlines(sym,startMacd,endTs,slot.macdTf);
           macdMap=buildMacdMapIntraday(raw,periodMs);
         } else {
-          const url=`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${slot.macdTf}&startTime=${startMacd}&endTime=${endTs}&limit=1000`;
-          const resp=await fetch(url);
-          if(!resp.ok) throw new Error(sym+': lỗi MACD '+slot.macdTf+' HTTP '+resp.status);
-          macdMap=buildMacdMap(await resp.json());
+          const raw=await fetchKlines(sym,startMacd,endTs,slot.macdTf);
+          macdMap=buildMacdMap(raw);
         }
         const periodMs2=MACD_INTRADAY_MS[slot.macdTf];
         lookupFn=periodMs2?(map,ts)=>getMacdHistIntraday(map,ts,periodMs2):getMacdHist;
@@ -1932,10 +1922,8 @@ async function runMultiSlot(){
         if(slotTrendTf!=='none'){
           setMultiStatus('⏳ '+sym+': tải MACD Trend '+slotTrendTf.toUpperCase()+'...');
           const startMacd2=startTs-60*86400000;
-          const urlTrend=`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=${slotTrendTf}&startTime=${startMacd2}&endTime=${endTs}&limit=1000`;
-          const rTrend=await fetch(urlTrend);
-          if(!rTrend.ok) throw new Error(sym+': lỗi MACD Trend '+slotTrendTf+' HTTP '+rTrend.status);
-          trendMap=buildMacdMap(await rTrend.json());
+          const rawTrend=await fetchKlines(sym,startMacd2,endTs,slotTrendTf);
+          trendMap=buildMacdMap(rawTrend);
         }
       }
 
