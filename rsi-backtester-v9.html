@@ -583,7 +583,6 @@ async function runSession(){
   if(macdTf!=='none'){
     try{
       setStatus('⏳ Đang tải nến MACD '+macdTf.toUpperCase()+'...');
-      const startMacd=startTs-60*86400000; // lấy thêm 60 ngày để EMA ổn định
       const periodMs=MACD_INTRADAY_MS[macdTf];
       if(periodMs){
         // Intraday: 1H / 2H / 4H
@@ -615,7 +614,7 @@ async function runSession(){
       } else {
         // Fetch MACD candles riêng cho từng coin
         setStatus('⏳ '+sym+': tải MACD '+macdTf.toUpperCase()+'...');
-        const startMacd=startTs-60*86400000;
+        const startMacd=startTs-MACD_WARM_UP*(MACD_TF_MS[macdTf]||86400000);
         const periodMs=MACD_INTRADAY_MS[macdTf];
         let coinMacdMap;
         if(periodMs){
@@ -630,7 +629,8 @@ async function runSession(){
         const macdTrendTf=session.macdTrendTf||'none';
         if(macdTrendTf!=='none'){
           setStatus('⏳ '+sym+': tải MACD Trend '+macdTrendTf.toUpperCase()+'...');
-          const rawTrend=await fetchKlines(sym,startMacd,endTs,macdTrendTf);
+          const startMacdTrend=startTs-MACD_WARM_UP*(MACD_TF_MS[macdTrendTf]||86400000);
+          const rawTrend=await fetchKlines(sym,startMacdTrend,endTs,macdTrendTf);
           coinTrendMap=buildMacdMap(rawTrend);
         }
         const effectiveAlign=macdTrendTf!=='none'?'trend':macdAlign;
@@ -1241,6 +1241,8 @@ function getMacdHist(macdMap, tsMs){
 
 // ── Intraday MACD (1H/2H/4H) — map theo periodKey = floor(openTime/periodMs) ─
 const MACD_INTRADAY_MS={'1h':3600000,'2h':7200000,'4h':14400000};
+const MACD_TF_MS={'1h':3600000,'2h':7200000,'4h':14400000,'1d':86400000,'3d':259200000,'1w':604800000};
+const MACD_WARM_UP=200; // số nến warm-up EMA cho mọi khung TF
 function buildMacdMapIntraday(candles, periodMs){
   const closes=candles.map(c=>parseFloat(c[4]));
   const opens =candles.map(c=>c[0]);
@@ -1426,7 +1428,7 @@ async function runOptimizer(){
     for(const tf of tfMacd){
       optState.statusMsg=`Đang tải nến ${tf.toUpperCase()} (MACD Trading)...`;
       renderOptimizer();
-      const startD=startTs-60*86400000;
+      const startD=startTs-MACD_WARM_UP*(MACD_TF_MS[tf]||86400000);
       const periodMs=MACD_INTRADAY_MS[tf];
       if(periodMs){
         const raw=await fetchKlines(optState.coin,startD,endTs,tf);
@@ -1440,7 +1442,7 @@ async function runOptimizer(){
     for(const tf of selectedTrendTfs){
       optState.statusMsg=`Đang tải nến ${tf.toUpperCase()} (MACD Trend)...`;
       renderOptimizer();
-      const startD=startTs-60*86400000;
+      const startD=startTs-MACD_WARM_UP*(MACD_TF_MS[tf]||86400000);
       const rawTrend=await fetchKlines(optState.coin,startD,endTs,tf);
       macdTrendMapByTf[tf]=buildMacdMap(rawTrend);
     }
@@ -1907,7 +1909,7 @@ async function runMultiSlot(){
       const slotTrendTf=slot.macdTrendTf||'none';
       if(slot.macdAuto!==false){
         setMultiStatus('⏳ '+sym+': tải MACD Trading '+slot.macdTf.toUpperCase()+'...');
-        const startMacd=startTs-60*86400000;
+        const startMacd=startTs-MACD_WARM_UP*(MACD_TF_MS[slot.macdTf]||86400000);
         const periodMs=MACD_INTRADAY_MS[slot.macdTf];
         if(periodMs){
           const raw=await fetchKlines(sym,startMacd,endTs,slot.macdTf);
@@ -1921,7 +1923,7 @@ async function runMultiSlot(){
         // ── MACD Trend fetch (chỉ khi Trading bật) ───────────────────────────
         if(slotTrendTf!=='none'){
           setMultiStatus('⏳ '+sym+': tải MACD Trend '+slotTrendTf.toUpperCase()+'...');
-          const startMacd2=startTs-60*86400000;
+          const startMacd2=startTs-MACD_WARM_UP*(MACD_TF_MS[slotTrendTf]||86400000);
           const rawTrend=await fetchKlines(sym,startMacd2,endTs,slotTrendTf);
           trendMap=buildMacdMap(rawTrend);
         }
