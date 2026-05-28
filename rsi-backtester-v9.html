@@ -1515,8 +1515,12 @@ async function runOptimizer(){
     }
   }
 
-  res.sort((a,b)=>b[optState.sortBy==='wr'?'wr':optState.sortBy==='trades'?'trades':'pnl']
-                 -a[optState.sortBy==='wr'?'wr':optState.sortBy==='trades'?'trades':'pnl']);
+  res.sort((a,b)=>{
+    if(optState.sortBy==='wr') return b.wr-a.wr;
+    if(optState.sortBy==='trades') return b.trades-a.trades;
+    if(optState.sortBy==='netpnl') return (b.pnl-b.trades*feeRate)-(a.pnl-a.trades*feeRate);
+    return b.pnl-a.pnl;
+  });
   optState.results=res;
   optState.progress=combos;
   optState.running=false;
@@ -1526,7 +1530,12 @@ async function runOptimizer(){
 
 function setOptSort(by){
   optState.sortBy=by;
-  optState.results.sort((a,b)=>b[by==='wr'?'wr':by==='trades'?'trades':'pnl']-a[by==='wr'?'wr':by==='trades'?'trades':'pnl']);
+  optState.results.sort((a,b)=>{
+    if(by==='wr') return b.wr-a.wr;
+    if(by==='trades') return b.trades-a.trades;
+    if(by==='netpnl') return (b.pnl-b.trades*feeRate)-(a.pnl-a.trades*feeRate);
+    return b.pnl-a.pnl;
+  });
   renderOptimizer();
 }
 
@@ -1766,6 +1775,7 @@ function renderOptimizer(){
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <span style="font-size:10px;color:var(--dim);align-self:center;">Sắp xếp:</span>
           <button class="sort-btn ${o.sortBy==='pnl'?'on':''}" onclick="setOptSort('pnl')">PnL</button>
+          <button class="sort-btn ${o.sortBy==='netpnl'?'on':''}" onclick="setOptSort('netpnl')">Net PnL</button>
           <button class="sort-btn ${o.sortBy==='wr'?'on':''}"  onclick="setOptSort('wr')">WinRate</button>
           <button class="sort-btn ${o.sortBy==='trades'?'on':''}" onclick="setOptSort('trades')">Lệnh</button>
         </div>
