@@ -2443,16 +2443,16 @@ function rtCheckDir(dir,dirCfg,rsi,prevIdx,lastIdx,ts,macdMap,lookupFn,trendMap,
       ?(dir==='buy'?hist<=0:hist>=0)
       :(dir==='buy'?hist>=0:hist<=0);
     if(block) return {status:'MACD_BLOCK',
-      msg:`MACD ${(macdTf||'').toUpperCase()}: ${hist>=0?'+':''}${hist.toFixed(4)} → chặn`,hist};
+      msg:`NGƯỢC CHIỀU — OFF ${dir==='buy'?'LONG':'SHORT'} · MACD ${(macdTf||'').toUpperCase()}: ${hist>=0?'+':''}${hist.toFixed(4)}`,hist};
 
     // Bước 2: MACD Trend
     if(trendMap){
       const th=getMacdHist(trendMap,ts);
       if(th===null) return {status:'NO_DATA',msg:'Không có data MACD Trend'};
       if(dir==='buy'&&th<=0) return {status:'TREND_BLOCK',
-        msg:`MACD Trend: ${th.toFixed(4)} âm → chặn Long`,hist:th};
+        msg:`TREND NGƯỢC — OFF LONG · Trend ${(trendTf||'').toUpperCase()}: ${th.toFixed(4)}`,hist:th};
       if(dir==='sell'&&th>=0) return {status:'TREND_BLOCK',
-        msg:`MACD Trend: +${th.toFixed(4)} dương → chặn Short`,hist:th};
+        msg:`TREND NGƯỢC — OFF SHORT · Trend ${(trendTf||'').toUpperCase()}: +${th.toFixed(4)}`,hist:th};
     }
   }
 
@@ -2554,8 +2554,9 @@ function renderRealtime(){
   const el=document.getElementById('rtSection');
   if(!el) return;
 
-  const stColor=s=>s==='SIGNAL'?'var(--grn)':s==='WAIT_RSI'?'var(--ora)':s==='MACD_BLOCK'||s==='TREND_BLOCK'?'var(--red)':'var(--dim)';
-  const stIcon=s=>s==='SIGNAL'?'✅':s==='WAIT_RSI'?'⏳':s==='MACD_BLOCK'?'❌':s==='TREND_BLOCK'?'🚫':s==='NO_DATA'?'⚠️':'💤';
+  const stColor=s=>s==='SIGNAL'?'var(--grn)':s==='WAIT_RSI'?'var(--ora)':s==='MACD_BLOCK'?'#b91c1c':s==='TREND_BLOCK'?'#7c3aed':'var(--dim)';
+  const stBg=s=>s==='MACD_BLOCK'?'rgba(185,28,28,.08)':s==='TREND_BLOCK'?'rgba(124,58,237,.08)':'transparent';
+  const stIcon=s=>s==='SIGNAL'?'✅':s==='WAIT_RSI'?'⏳':s==='MACD_BLOCK'?'🔴':s==='TREND_BLOCK'?'🟣':s==='NO_DATA'?'⚠️':'💤';
 
   let resHtml='';
   if(rtResults.length>0){
@@ -2579,7 +2580,7 @@ function renderRealtime(){
       const cfg=r.cfg;
       const isSignal=r.long?.status==='SIGNAL'||r.short?.status==='SIGNAL';
       const cfgSum=`RSI ${(cfg.rsiTf||'').toUpperCase()}${cfg.macdAuto!==false?' · MACD '+(cfg.macdTf||'').toUpperCase():''}${cfg.macdTrendTf&&cfg.macdTrendTf!=='none'?' · T:'+(cfg.macdTrendTf||'').toUpperCase():''}`;
-      const mkCell=d=>d?`<span style="color:${stColor(d.status)};font-size:11px;font-weight:700;display:block;">${stIcon(d.status)} ${d.msg}</span>`:'<span style="color:var(--dim);font-size:10px;">TẮT</span>';
+      const mkCell=d=>d?`<span style="color:${stColor(d.status)};font-size:11px;font-weight:700;display:block;background:${stBg(d.status)};border-radius:5px;padding:${stBg(d.status)!=='transparent'?'3px 6px':'0'};">${stIcon(d.status)} ${d.msg}</span>`:'<span style="color:var(--dim);font-size:10px;">TẮT</span>';
       resHtml+=`<tr style="${isSignal?'background:rgba(22,163,74,.06);':''}" >
         <td style="color:var(--dim)">${i+1}</td>
         <td style="font-weight:800;color:var(--hi);font-family:'JetBrains Mono',monospace;font-size:11px;">${rtDisplayName(r.filename)}</td>
