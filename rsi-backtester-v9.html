@@ -2605,7 +2605,7 @@ function renderRealtime(){
     </div>
     <div class="tbl-wrap"><div class="tbl-scroll"><table>
       <thead><tr>
-        <th>#</th><th>Coin</th><th>Cấu hình</th>
+        <th>#</th><th style="position:sticky;left:0;z-index:2;background:var(--bg1,#f8f9fb);">Coin</th><th>Cấu hình</th>
         <th style="color:var(--grn)">▲ LONG</th>
         <th style="color:var(--red)">▼ SHORT</th>
         <th>Nến đóng</th>
@@ -2618,7 +2618,7 @@ function renderRealtime(){
       const cfgSum=`RSI ${(cfg.rsiTf||'').toUpperCase()}${cfg.macdAuto!==false?' · MACD '+(cfg.macdTf||'').toUpperCase():''}${cfg.macdTrendTf&&cfg.macdTrendTf!=='none'?' · T:'+(cfg.macdTrendTf||'').toUpperCase():''}`;
       resHtml+=`<tr style="${isSignal?'background:rgba(22,163,74,.06);':isWait?'background:rgba(217,119,6,.04);':''}">
         <td style="color:var(--dim)">${i+1}</td>
-        <td style="font-weight:800;color:var(--hi);font-family:'JetBrains Mono',monospace;font-size:11px;">${rtDisplayName(r.filename)}</td>
+        <td style="position:sticky;left:0;z-index:1;background:${isSignal?'rgba(22,163,74,.06)':isWait?'rgba(217,119,6,.04)':'var(--bg0,#fff)'};font-weight:800;color:var(--hi);font-family:'JetBrains Mono',monospace;font-size:11px;">${rtDisplayName(r.filename)}</td>
         <td style="font-size:10px;color:var(--dim)">${cfgSum}</td>
         <td>${r.error?`<span style="color:var(--red);font-size:10px">⚠️ ${esc(r.error)}</span>`:mkCell(r.long,i+'_L')}</td>
         <td>${r.error?'':mkCell(r.short,i+'_S')}</td>
