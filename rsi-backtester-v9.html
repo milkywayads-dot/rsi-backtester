@@ -2386,6 +2386,14 @@ let rtLoading=false;
 let rtOpen=true;
 let rtStatus='';
 
+// ── Tên hiển thị từ filename: XRP_cfg-from2020-2.json → XRP_config-2 ─────────
+function rtDisplayName(filename){
+  const base=filename.replace(/\.json$/i,'');
+  const coin=(base.match(/^([A-Za-z]+)_/)||[])[1]||base;
+  const num=(base.match(/-(\d+)$/)||[])[1]||'';
+  return num?`${coin.toUpperCase()}_config-${num}`:`${coin.toUpperCase()}_config`;
+}
+
 // ── Load nhiều file JSON cùng lúc ────────────────────────────────────────────
 function loadRtFiles(input){
   const files=Array.from(input.files);
@@ -2574,7 +2582,7 @@ function renderRealtime(){
       const mkCell=d=>d?`<span style="color:${stColor(d.status)};font-size:11px;font-weight:700;display:block;">${stIcon(d.status)} ${d.msg}</span>`:'<span style="color:var(--dim);font-size:10px;">TẮT</span>';
       resHtml+=`<tr style="${isSignal?'background:rgba(22,163,74,.06);':''}" >
         <td style="color:var(--dim)">${i+1}</td>
-        <td style="font-weight:800;color:var(--hi);font-family:'JetBrains Mono',monospace">${r.sym.replace('USDT','')}</td>
+        <td style="font-weight:800;color:var(--hi);font-family:'JetBrains Mono',monospace;font-size:11px;">${rtDisplayName(r.filename)}</td>
         <td style="font-size:10px;color:var(--dim)">${cfgSum}</td>
         <td>${r.error?`<span style="color:var(--red);font-size:10px">⚠️ ${esc(r.error)}</span>`:mkCell(r.long)}</td>
         <td>${r.error?'':mkCell(r.short)}</td>
