@@ -2528,7 +2528,7 @@ async function rtScanOne(item){
 async function runRealtime(){
   if(!rtConfigs.length){alert('Chưa load file cấu hình!');return;}
   rtLoading=true;rtResults=[];
-  const priority={SIGNAL:0,WAIT_RSI:1,MACD_BLOCK:2,TREND_BLOCK:3,NO_SIGNAL:4,NO_DATA:5,DISABLED:6};
+  const priority={SIGNAL:0,WAIT_RSI:1,NO_SIGNAL:1,MACD_BLOCK:2,TREND_BLOCK:2,NO_DATA:3,DISABLED:9};
   for(let i=0;i<rtConfigs.length;i++){
     rtStatus=`Đang quét ${i+1}/${rtConfigs.length}: ${rtConfigs[i].cfg.coin}...`;
     renderRealtime();
@@ -2587,7 +2587,8 @@ function renderRealtime(){
       const mkCell=d=>{
         if(!d) return '<span style="color:var(--b3);font-size:10px;">—</span>';
         if(d.status==='SIGNAL') return `<span style="color:var(--grn);font-size:12px;font-weight:800;display:block;">✅ ${d.msg}</span>`;
-        if(d.status==='WAIT_RSI') return `<span style="color:var(--ora);font-size:11px;font-weight:700;display:block;">⏳ ${d.msg}</span>`;
+        if(d.status==='WAIT_RSI'||d.status==='NO_SIGNAL') return `<span style="color:var(--ora);font-size:11px;font-weight:700;display:block;">⏳ ${d.msg}</span>`;
+        if(d.status==='DISABLED') return `<span style="color:var(--b3);font-size:10px;">—</span>`;
         return `<span style="display:block;font-size:11px;font-weight:700;color:var(--red);">❌ <span style="color:var(--dim);font-size:10px;font-weight:400;">${d.msg}</span></span>`;
       };
       resHtml+=`<tr style="${isSignal?'background:rgba(22,163,74,.06);':isWait?'background:rgba(217,119,6,.04);':''}">
