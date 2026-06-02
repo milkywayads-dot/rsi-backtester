@@ -2430,13 +2430,17 @@ async function fetchKlinesLatest(sym,tf,limit){
 }
 
 // ── Kiểm tra 1 chiều lệnh ────────────────────────────────────────────────────
-function rtCheckDir(dir,dirCfg,rsi,prevIdx,lastIdx,ts,macdMap,lookupFn,trendMap,trendTf,macdAuto,macdTf){
+// macdTs = openTime nến MACD đã đóng gần nhất (khác ts của RSI)
+// trendTs = openTime nến Trend đã đóng gần nhất
+function rtCheckDir(dir,dirCfg,rsi,prevIdx,lastIdx,ts,macdMap,lookupFn,trendMap,trendTf,macdAuto,macdTf,macdTs,trendTs){
   const level=parseFloat(dirCfg.rsiLevel);
   const rsiPrev=rsi[prevIdx], rsiLast=rsi[lastIdx];
 
-  // Tính sẵn tất cả giá trị để hiển thị chi tiết khi click ❌
-  const macdHist=(macdAuto!==false&&macdMap&&lookupFn)?lookupFn(macdMap,ts):null;
-  const trendHist=trendMap?getMacdHist(trendMap,ts):null;
+  // Dùng timestamp của nến MACD/Trend đã đóng để lookup — tránh null do nến đang mở
+  const macdLookupTs=macdTs??ts;
+  const trendLookupTs=trendTs??ts;
+  const macdHist=(macdAuto!==false&&macdMap&&lookupFn)?lookupFn(macdMap,macdLookupTs):null;
+  const trendHist=trendMap?getMacdHist(trendMap,trendLookupTs):null;
   const det={rsiVal:rsiLast?.toFixed(2),macdHist,trendHist,level,dir,macdTf,trendTf};
 
   if(!rsiPrev||!rsiLast) return {status:'NO_DATA',...det};
@@ -2488,18 +2492,22 @@ async function rtScanOne(item){
     const d=new Date(ts);
     result.lastCandleTime=pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes());
 
-    // MACD — fetch 201 nến, bỏ nến cuối (đang mở chưa đóng) để tính histogram chính xác
+    // MACD — fetch 201 nến, bỏ nến cuối (đang mở) — dùng openTime nến đóng cuối để lookup
     let macdMap=null,lookupFn=null,trendMap=null;
+    let lastMacdTs=null,lastTrendTs=null;
     const trendTf=cfg.macdTrendTf||'none';
     if(cfg.macdAuto!==false&&cfg.macdTf){
       const mc=await fetchKlinesLatest(sym,cfg.macdTf,201);
-      const mcClosed=mc.slice(0,-1); // chỉ dùng nến đã đóng
+      const mcClosed=mc.slice(0,-1); // bỏ nến đang mở
+      lastMacdTs=mcClosed[mcClosed.length-1][0]; // openTime nến MACD đóng gần nhất
       const pMs=MACD_INTRADAY_MS[cfg.macdTf];
       if(pMs){macdMap=buildMacdMapIntraday(mcClosed,pMs);lookupFn=(m,t)=>getMacdHistIntraday(m,t,pMs);}
       else{macdMap=buildMacdMap(mcClosed);lookupFn=getMacdHist;}
       if(trendTf!=='none'){
         const tc=await fetchKlinesLatest(sym,trendTf,201);
-        trendMap=buildMacdMap(tc.slice(0,-1)); // chỉ dùng nến đã đóng
+        const tcClosed=tc.slice(0,-1); // bỏ nến đang mở
+        lastTrendTs=tcClosed[tcClosed.length-1][0]; // openTime nến Trend đóng gần nhất
+        trendMap=buildMacdMap(tcClosed);
       }
     }
 
@@ -2508,7 +2516,7 @@ async function rtScanOne(item){
       result.long={status:'DISABLED',msg:'LONG TẮT trong cấu hình'};
     } else if(cfg.long){
       const rsiL=calcRSI(closes,parseInt(cfg.long.rsiPeriod)||14);
-      result.long=rtCheckDir('buy',cfg.long,rsiL,prevIdx,lastIdx,ts,macdMap,lookupFn,trendMap,trendTf,cfg.macdAuto,cfg.macdTf);
+      result.long=rtCheckDir('buy',cfg.long,rsiL,prevIdx,lastIdx,ts,macdMap,lookupFn,trendMap,trendTf,cfg.macdAuto,cfg.macdTf,lastMacdTs,lastTrendTs);
       result.long.rsiCur=rsiL[n-1]?.toFixed(1);
     }
     // Short
@@ -2516,7 +2524,7 @@ async function rtScanOne(item){
       result.short={status:'DISABLED',msg:'SHORT TẮT trong cấu hình'};
     } else if(cfg.short){
       const rsiS=calcRSI(closes,parseInt(cfg.short.rsiPeriod)||14);
-      result.short=rtCheckDir('sell',cfg.short,rsiS,prevIdx,lastIdx,ts,macdMap,lookupFn,trendMap,trendTf,cfg.macdAuto,cfg.macdTf);
+      result.short=rtCheckDir('sell',cfg.short,rsiS,prevIdx,lastIdx,ts,macdMap,lookupFn,trendMap,trendTf,cfg.macdAuto,cfg.macdTf,lastMacdTs,lastTrendTs);
       result.short.rsiCur=rsiS[n-1]?.toFixed(1);
     }
   }catch(e){result.error=e.message;}
