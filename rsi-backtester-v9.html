@@ -2590,7 +2590,7 @@ function renderRealtime(){
         if(d.status==='WAIT_RSI') return `<span style="color:var(--ora);font-size:11px;font-weight:700;display:block;">⏳ ${d.msg}</span>`;
         return `<span style="display:block;font-size:11px;font-weight:700;color:var(--red);">❌ <span style="color:var(--dim);font-size:10px;font-weight:400;">${d.msg}</span></span>`;
       };
-      resHtml+=`<tr style="${isSignal?'background:rgba(22,163,74,.06);':isWait?'background:rgba(217,119,6,.04);':''}">`;
+      resHtml+=`<tr style="${isSignal?'background:rgba(22,163,74,.06);':isWait?'background:rgba(217,119,6,.04);':''}">
         <td style="color:var(--dim)">${i+1}</td>
         <td style="font-weight:800;color:var(--hi);font-family:'JetBrains Mono',monospace;font-size:11px;">${rtDisplayName(r.filename)}</td>
         <td style="font-size:10px;color:var(--dim)">${cfgSum}</td>
