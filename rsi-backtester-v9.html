@@ -2443,16 +2443,16 @@ function rtCheckDir(dir,dirCfg,rsi,prevIdx,lastIdx,ts,macdMap,lookupFn,trendMap,
       ?(dir==='buy'?hist<=0:hist>=0)
       :(dir==='buy'?hist>=0:hist<=0);
     if(block) return {status:'MACD_BLOCK',
-      msg:`MACD ${(macdTf||'').toUpperCase()} ngược chiều · hist: ${hist>=0?'+':''}${hist.toFixed(4)}`,hist};
+      msg:`NGƯỢC CHIỀU — OFF ${dir==='buy'?'LONG':'SHORT'} · MACD ${(macdTf||'').toUpperCase()}: ${hist>=0?'+':''}${hist.toFixed(4)}`,hist};
 
     // Bước 2: MACD Trend
     if(trendMap){
       const th=getMacdHist(trendMap,ts);
       if(th===null) return {status:'NO_DATA',msg:'Không có data MACD Trend'};
       if(dir==='buy'&&th<=0) return {status:'TREND_BLOCK',
-        msg:`TREND ${(trendTf||'').toUpperCase()} ngược chiều · hist: ${th.toFixed(4)}`,hist:th};
+        msg:`TREND NGƯỢC — OFF LONG · Trend ${(trendTf||'').toUpperCase()}: ${th.toFixed(4)}`,hist:th};
       if(dir==='sell'&&th>=0) return {status:'TREND_BLOCK',
-        msg:`TREND ${(trendTf||'').toUpperCase()} ngược chiều · hist: +${th.toFixed(4)}`,hist:th};
+        msg:`TREND NGƯỢC — OFF SHORT · Trend ${(trendTf||'').toUpperCase()}: +${th.toFixed(4)}`,hist:th};
     }
   }
 
