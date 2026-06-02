@@ -230,6 +230,7 @@ tr:nth-child(even) td{background:rgba(243,244,246,.8);}
   </div>
   <div id="optimizerSection" style="margin-top:8px;"></div>
   <div id="multiSlotSection" style="margin-top:8px;"></div>
+  <div id="rtSection" style="margin-top:8px;"></div>
 
   <div class="footer">⚠ Backtest chỉ mang tính tham khảo – không phải tư vấn đầu tư.</div>
 </div>
@@ -2376,10 +2377,273 @@ function renderMultiSlot(){
   el.innerHTML=html;
 }
 
+// ══════════════════════════════════════════════
+//  BACKTEST REALTIME — STATE
+// ══════════════════════════════════════════════
+let rtConfigs=[];   // [{filename, cfg}]
+let rtResults=[];   // kết quả scan
+let rtLoading=false;
+let rtOpen=true;
+let rtStatus='';
+
+// ── Load nhiều file JSON cùng lúc ────────────────────────────────────────────
+function loadRtFiles(input){
+  const files=Array.from(input.files);
+  if(!files.length) return;
+  let loaded=0;
+  const newCfgs=[];
+  files.forEach(file=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const cfg=JSON.parse(e.target.result);
+        if(cfg.coin) newCfgs.push({filename:file.name,cfg});
+      }catch(err){}
+      loaded++;
+      if(loaded===files.length){
+        rtConfigs=[...rtConfigs,...newCfgs];
+        rtResults=[];
+        rtStatus=`Đã load ${rtConfigs.length} cấu hình`;
+        renderRealtime();
+      }
+    };
+    reader.readAsText(file);
+  });
+  input.value='';
+}
+
+// ── Fetch N nến mới nhất (không cần range) ───────────────────────────────────
+async function fetchKlinesLatest(sym,tf,limit){
+  const url=`https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(sym)}&interval=${tf}&limit=${limit}`;
+  const r=await fetch(url);
+  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+  return await r.json();
+}
+
+// ── Kiểm tra 1 chiều lệnh ────────────────────────────────────────────────────
+function rtCheckDir(dir,dirCfg,rsi,prevIdx,lastIdx,ts,macdMap,lookupFn,trendMap,trendTf,macdAuto,macdTf){
+  const level=parseFloat(dirCfg.rsiLevel);
+  const rsiPrev=rsi[prevIdx], rsiLast=rsi[lastIdx];
+  if(!rsiPrev||!rsiLast) return {status:'NO_DATA',msg:'Không đủ data RSI'};
+
+  // Bước 1: MACD Trading
+  if(macdAuto!==false&&macdMap){
+    const align=trendTf!=='none'?'trend':(dirCfg.macdAlign||'trend');
+    const hist=lookupFn(macdMap,ts);
+    if(hist===null) return {status:'NO_DATA',msg:'Không có data MACD'};
+    const block=align==='trend'
+      ?(dir==='buy'?hist<=0:hist>=0)
+      :(dir==='buy'?hist>=0:hist<=0);
+    if(block) return {status:'MACD_BLOCK',
+      msg:`MACD ${(macdTf||'').toUpperCase()}: ${hist>=0?'+':''}${hist.toFixed(4)} → chặn`,hist};
+
+    // Bước 2: MACD Trend
+    if(trendMap){
+      const th=getMacdHist(trendMap,ts);
+      if(th===null) return {status:'NO_DATA',msg:'Không có data MACD Trend'};
+      if(dir==='buy'&&th<=0) return {status:'TREND_BLOCK',
+        msg:`MACD Trend: ${th.toFixed(4)} âm → chặn Long`,hist:th};
+      if(dir==='sell'&&th>=0) return {status:'TREND_BLOCK',
+        msg:`MACD Trend: +${th.toFixed(4)} dương → chặn Short`,hist:th};
+    }
+  }
+
+  // Bước 3: RSI cắt nến đã đóng
+  const crossed=dir==='buy'
+    ?(rsiPrev<level&&rsiLast>level)
+    :(rsiPrev>level&&rsiLast<level);
+  if(crossed) return {status:'SIGNAL',
+    msg:`RSI cắt ${dir==='buy'?'↑':'↓'} ${level} (${rsiLast.toFixed(1)})`,rsiVal:rsiLast};
+
+  // RSI đang ở đúng phía để có thể cắt
+  const canCross=dir==='buy'?rsiLast<level:rsiLast>level;
+  if(canCross) return {status:'WAIT_RSI',
+    msg:`Chờ RSI cắt ${dir==='buy'?'↑':'↓'} ${level} · hiện: ${rsiLast.toFixed(1)}`,rsiVal:rsiLast};
+
+  return {status:'NO_SIGNAL',
+    msg:`RSI ${rsiLast.toFixed(1)} — chưa vào vùng`,rsiVal:rsiLast};
+}
+
+// ── Scan 1 config ─────────────────────────────────────────────────────────────
+async function rtScanOne(item){
+  const {filename,cfg}=item;
+  const sym=(cfg.coin||'').toUpperCase();
+  const result={filename,sym,cfg,long:null,short:null,error:null,lastCandleTime:'—'};
+  try{
+    const rsiCandles=await fetchKlinesLatest(sym,cfg.rsiTf||'1h',150);
+    if(!rsiCandles||rsiCandles.length<5) throw new Error('Không đủ data nến');
+    const closes=rsiCandles.map(c=>parseFloat(c[4]));
+    const n=closes.length;
+    const lastIdx=n-2; // nến đã đóng gần nhất
+    const prevIdx=n-3; // nến trước đó
+    const ts=rsiCandles[lastIdx][0];
+
+    // Thời gian nến đóng
+    const d=new Date(ts);
+    result.lastCandleTime=pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes());
+
+    // MACD
+    let macdMap=null,lookupFn=null,trendMap=null;
+    const trendTf=cfg.macdTrendTf||'none';
+    if(cfg.macdAuto!==false&&cfg.macdTf){
+      const mc=await fetchKlinesLatest(sym,cfg.macdTf,200);
+      const pMs=MACD_INTRADAY_MS[cfg.macdTf];
+      if(pMs){macdMap=buildMacdMapIntraday(mc,pMs);lookupFn=(m,t)=>getMacdHistIntraday(m,t,pMs);}
+      else{macdMap=buildMacdMap(mc);lookupFn=getMacdHist;}
+      if(trendTf!=='none'){
+        const tc=await fetchKlinesLatest(sym,trendTf,200);
+        trendMap=buildMacdMap(tc);
+      }
+    }
+
+    // Long
+    if(cfg.longEnabled!==false&&cfg.long){
+      const rsiL=calcRSI(closes,parseInt(cfg.long.rsiPeriod)||14);
+      result.long=rtCheckDir('buy',cfg.long,rsiL,prevIdx,lastIdx,ts,macdMap,lookupFn,trendMap,trendTf,cfg.macdAuto,cfg.macdTf);
+      result.long.rsiCur=rsiL[n-1]?.toFixed(1);
+    }
+    // Short
+    if(cfg.shortEnabled!==false&&cfg.short){
+      const rsiS=calcRSI(closes,parseInt(cfg.short.rsiPeriod)||14);
+      result.short=rtCheckDir('sell',cfg.short,rsiS,prevIdx,lastIdx,ts,macdMap,lookupFn,trendMap,trendTf,cfg.macdAuto,cfg.macdTf);
+      result.short.rsiCur=rsiS[n-1]?.toFixed(1);
+    }
+  }catch(e){result.error=e.message;}
+  return result;
+}
+
+// ── Chạy quét toàn bộ ────────────────────────────────────────────────────────
+async function runRealtime(){
+  if(!rtConfigs.length){alert('Chưa load file cấu hình!');return;}
+  rtLoading=true;rtResults=[];
+  const priority={SIGNAL:0,WAIT_RSI:1,MACD_BLOCK:2,TREND_BLOCK:3,NO_SIGNAL:4,NO_DATA:5};
+  for(let i=0;i<rtConfigs.length;i++){
+    rtStatus=`Đang quét ${i+1}/${rtConfigs.length}: ${rtConfigs[i].cfg.coin}...`;
+    renderRealtime();
+    const r=await rtScanOne(rtConfigs[i]);
+    rtResults.push(r);
+  }
+  rtResults.sort((a,b)=>{
+    const pa=Math.min(
+      a.long?(priority[a.long.status]??9):9,
+      a.short?(priority[a.short.status]??9):9,
+      a.error?9:9
+    );
+    const pb=Math.min(
+      b.long?(priority[b.long.status]??9):9,
+      b.short?(priority[b.short.status]??9):9,
+      b.error?9:9
+    );
+    return pa-pb;
+  });
+  rtLoading=false;
+  rtStatus=`✅ Quét xong ${rtResults.length} cấu hình`;
+  renderRealtime();
+}
+
+// ── Render section ────────────────────────────────────────────────────────────
+function renderRealtime(){
+  const el=document.getElementById('rtSection');
+  if(!el) return;
+
+  const stColor=s=>s==='SIGNAL'?'var(--grn)':s==='WAIT_RSI'?'var(--ora)':s==='MACD_BLOCK'||s==='TREND_BLOCK'?'var(--red)':'var(--dim)';
+  const stIcon=s=>s==='SIGNAL'?'✅':s==='WAIT_RSI'?'⏳':s==='MACD_BLOCK'?'❌':s==='TREND_BLOCK'?'🚫':s==='NO_DATA'?'⚠️':'💤';
+
+  let resHtml='';
+  if(rtResults.length>0){
+    const signalCount=rtResults.filter(r=>r.long?.status==='SIGNAL'||r.short?.status==='SIGNAL').length;
+    const waitCount=rtResults.filter(r=>!r.error&&(r.long?.status==='WAIT_RSI'||r.short?.status==='WAIT_RSI')).length;
+    resHtml=`
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+      <div style="background:rgba(22,163,74,.1);border:1px solid var(--grn);border-radius:8px;padding:6px 14px;font-size:12px;font-weight:800;color:var(--grn);">✅ Tín hiệu: ${signalCount}</div>
+      <div style="background:rgba(217,119,6,.1);border:1px solid var(--ora);border-radius:8px;padding:6px 14px;font-size:12px;font-weight:800;color:var(--ora);">⏳ Chờ RSI: ${waitCount}</div>
+      <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:6px 14px;font-size:12px;color:var(--dim);">Tổng: ${rtResults.length}</div>
+    </div>
+    <div class="tbl-wrap"><div class="tbl-scroll"><table>
+      <thead><tr>
+        <th>#</th><th>Coin</th><th>Cấu hình</th>
+        <th style="color:var(--grn)">▲ LONG</th>
+        <th style="color:var(--red)">▼ SHORT</th>
+        <th>Nến đóng</th>
+      </tr></thead>
+      <tbody>`;
+    rtResults.forEach((r,i)=>{
+      const cfg=r.cfg;
+      const isSignal=r.long?.status==='SIGNAL'||r.short?.status==='SIGNAL';
+      const cfgSum=`RSI ${(cfg.rsiTf||'').toUpperCase()}${cfg.macdAuto!==false?' · MACD '+(cfg.macdTf||'').toUpperCase():''}${cfg.macdTrendTf&&cfg.macdTrendTf!=='none'?' · T:'+(cfg.macdTrendTf||'').toUpperCase():''}`;
+      const mkCell=d=>d?`<span style="color:${stColor(d.status)};font-size:11px;font-weight:700;display:block;">${stIcon(d.status)} ${d.msg}</span>`:'<span style="color:var(--dim);font-size:10px;">TẮT</span>';
+      resHtml+=`<tr style="${isSignal?'background:rgba(22,163,74,.06);':''}" >
+        <td style="color:var(--dim)">${i+1}</td>
+        <td style="font-weight:800;color:var(--hi);font-family:'JetBrains Mono',monospace">${r.sym.replace('USDT','')}</td>
+        <td style="font-size:10px;color:var(--dim)">${cfgSum}</td>
+        <td>${r.error?`<span style="color:var(--red);font-size:10px">⚠️ ${esc(r.error)}</span>`:mkCell(r.long)}</td>
+        <td>${r.error?'':mkCell(r.short)}</td>
+        <td style="font-size:10px;color:var(--dim)">${r.lastCandleTime}</td>
+      </tr>`;
+    });
+    resHtml+=`</tbody></table></div></div>`;
+  }
+
+  el.innerHTML=`<div style="
+    background:linear-gradient(135deg,rgba(79,70,229,.03),rgba(217,119,6,.03));
+    border:1px solid var(--b2);border-radius:16px;
+    padding:${rtOpen?'16px':'12px 16px'};margin-bottom:14px;">
+
+    <div onclick="rtOpen=!rtOpen;renderRealtime()" style="
+      display:flex;align-items:center;justify-content:space-between;cursor:pointer;${rtOpen?'margin-bottom:14px':''};">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:3px;height:22px;background:linear-gradient(180deg,var(--acc),var(--ora));border-radius:4px;flex-shrink:0;"></div>
+        <div>
+          <div style="font-size:13px;font-weight:900;color:var(--hi);letter-spacing:.5px;">📡 BACKTEST REALTIME</div>
+          ${rtOpen?`<div style="font-size:10px;color:var(--dim);margin-top:2px;letter-spacing:1px;">Quét tín hiệu nến đã đóng · Load hàng trăm JSON cùng lúc</div>`:''}
+        </div>
+      </div>
+      <div style="font-size:11px;font-weight:700;color:var(--acc);
+        background:rgba(79,70,229,.08);border:1px solid var(--acc);
+        border-radius:6px;padding:4px 12px;flex-shrink:0;">
+        ${rtOpen?'▲ Ẩn':'▼ Hiện'}
+      </div>
+    </div>
+
+    ${rtOpen?`
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px;">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;
+        background:var(--bg2);border:1.5px solid var(--b2);border-radius:10px;
+        padding:10px 16px;font-size:12px;font-weight:700;color:var(--acc);transition:border-color .15s;"
+        onmouseover="this.style.borderColor='var(--acc)'"
+        onmouseout="this.style.borderColor='var(--b2)'">
+        📂 LOAD FILE JSON (chọn nhiều file)
+        <input type="file" accept=".json" multiple onchange="loadRtFiles(this)" style="display:none">
+      </label>
+      ${rtConfigs.length>0?`
+        <span style="font-size:11px;color:var(--grn);font-weight:700;">✓ ${rtConfigs.length} cấu hình</span>
+        <button onclick="rtConfigs=[];rtResults=[];rtStatus='';renderRealtime()" style="
+          font-size:10px;padding:4px 10px;border-radius:6px;cursor:pointer;
+          background:var(--bg2);border:1px solid var(--b2);color:var(--dim);">✕ Xóa tất cả</button>
+      `:''}
+    </div>
+
+    ${rtStatus?`<div style="font-size:11px;color:${rtStatus.includes('✅')?'var(--grn)':rtLoading?'var(--acc)':'var(--dim)'};margin-bottom:10px;">${rtStatus}</div>`:''}
+
+    ${rtConfigs.length>0?`
+    <button onclick="runRealtime()" ${rtLoading?'disabled':''} style="
+      width:100%;padding:14px;border-radius:12px;border:none;cursor:pointer;
+      font:800 14px/1 'Outfit',sans-serif;letter-spacing:.5px;color:#fff;margin-bottom:12px;
+      background:${rtLoading?'var(--b2)':'linear-gradient(135deg,var(--acc),var(--ora))'};
+      transition:opacity .2s;${rtLoading?'cursor:not-allowed':''}">
+      ${rtLoading?'⏳ Đang quét...':'📡 QUÉT TÍN HIỆU NGAY'}
+    </button>`:''}
+
+    ${resHtml}
+    `:''}
+  </div>`;
+}
+
 // init
 render();
 renderOptimizer();
 renderMultiSlot();
+renderRealtime();
 </script>
 </body>
 </html>
