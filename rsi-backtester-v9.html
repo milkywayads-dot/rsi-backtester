@@ -2385,6 +2385,7 @@ let rtResults=[];   // kết quả scan
 let rtLoading=false;
 let rtOpen=true;
 let rtStatus='';
+let rtExpanded=new Set(); // key = "rowIdx_L" hoặc "rowIdx_S"
 
 // ── Tên hiển thị từ filename: XRP_cfg-from2020-2.json → XRP_config-2 ─────────
 function rtDisplayName(filename){
@@ -2432,27 +2433,28 @@ async function fetchKlinesLatest(sym,tf,limit){
 function rtCheckDir(dir,dirCfg,rsi,prevIdx,lastIdx,ts,macdMap,lookupFn,trendMap,trendTf,macdAuto,macdTf){
   const level=parseFloat(dirCfg.rsiLevel);
   const rsiPrev=rsi[prevIdx], rsiLast=rsi[lastIdx];
-  if(!rsiPrev||!rsiLast) return {status:'NO_DATA',msg:'Không đủ data RSI'};
+
+  // Tính sẵn tất cả giá trị để hiển thị chi tiết khi click ❌
+  const macdHist=(macdAuto!==false&&macdMap&&lookupFn)?lookupFn(macdMap,ts):null;
+  const trendHist=trendMap?getMacdHist(trendMap,ts):null;
+  const det={rsiVal:rsiLast?.toFixed(2),macdHist,trendHist,level,dir,macdTf,trendTf};
+
+  if(!rsiPrev||!rsiLast) return {status:'NO_DATA',...det};
 
   // Bước 1: MACD Trading
   if(macdAuto!==false&&macdMap){
     const align=trendTf!=='none'?'trend':(dirCfg.macdAlign||'trend');
-    const hist=lookupFn(macdMap,ts);
-    if(hist===null) return {status:'NO_DATA',msg:'Không có data MACD'};
+    if(macdHist===null) return {status:'NO_DATA',...det};
     const block=align==='trend'
-      ?(dir==='buy'?hist<=0:hist>=0)
-      :(dir==='buy'?hist>=0:hist<=0);
-    if(block) return {status:'MACD_BLOCK',
-      msg:`NGƯỢC CHIỀU — OFF ${dir==='buy'?'LONG':'SHORT'} · MACD ${(macdTf||'').toUpperCase()}: ${hist>=0?'+':''}${hist.toFixed(4)}`,hist};
+      ?(dir==='buy'?macdHist<=0:macdHist>=0)
+      :(dir==='buy'?macdHist>=0:macdHist<=0);
+    if(block) return {status:'MACD_BLOCK',...det};
 
     // Bước 2: MACD Trend
     if(trendMap){
-      const th=getMacdHist(trendMap,ts);
-      if(th===null) return {status:'NO_DATA',msg:'Không có data MACD Trend'};
-      if(dir==='buy'&&th<=0) return {status:'TREND_BLOCK',
-        msg:`TREND NGƯỢC — OFF LONG · Trend ${(trendTf||'').toUpperCase()}: ${th.toFixed(4)}`,hist:th};
-      if(dir==='sell'&&th>=0) return {status:'TREND_BLOCK',
-        msg:`TREND NGƯỢC — OFF SHORT · Trend ${(trendTf||'').toUpperCase()}: +${th.toFixed(4)}`,hist:th};
+      if(trendHist===null) return {status:'NO_DATA',...det};
+      if(dir==='buy'&&trendHist<=0) return {status:'TREND_BLOCK',...det};
+      if(dir==='sell'&&trendHist>=0) return {status:'TREND_BLOCK',...det};
     }
   }
 
@@ -2460,16 +2462,10 @@ function rtCheckDir(dir,dirCfg,rsi,prevIdx,lastIdx,ts,macdMap,lookupFn,trendMap,
   const crossed=dir==='buy'
     ?(rsiPrev<level&&rsiLast>level)
     :(rsiPrev>level&&rsiLast<level);
-  if(crossed) return {status:'SIGNAL',
-    msg:`RSI cắt ${dir==='buy'?'↑':'↓'} ${level} (${rsiLast.toFixed(1)})`,rsiVal:rsiLast};
+  if(crossed) return {status:'SIGNAL',...det};
 
-  // RSI đang ở đúng phía để có thể cắt
-  const canCross=dir==='buy'?rsiLast<level:rsiLast>level;
-  if(canCross) return {status:'WAIT_RSI',
-    msg:`Chờ RSI cắt ${dir==='buy'?'↑':'↓'} ${level} · hiện: ${rsiLast.toFixed(1)}`,rsiVal:rsiLast};
-
-  return {status:'NO_SIGNAL',
-    msg:`RSI ${rsiLast.toFixed(1)} — chưa vào vùng`,rsiVal:rsiLast};
+  // Chờ RSI (đúng phía hoặc chưa vào vùng — đều là Chờ RSI)
+  return {status:'WAIT_RSI',...det};
 }
 
 // ── Scan 1 config ─────────────────────────────────────────────────────────────
@@ -2528,7 +2524,7 @@ async function rtScanOne(item){
 async function runRealtime(){
   if(!rtConfigs.length){alert('Chưa load file cấu hình!');return;}
   rtLoading=true;rtResults=[];
-  const priority={SIGNAL:0,WAIT_RSI:1,NO_SIGNAL:1,MACD_BLOCK:2,TREND_BLOCK:2,NO_DATA:3,DISABLED:9};
+  const priority={SIGNAL:0,WAIT_RSI:1,MACD_BLOCK:2,TREND_BLOCK:2,NO_DATA:3,DISABLED:9};
   for(let i=0;i<rtConfigs.length;i++){
     rtStatus=`Đang quét ${i+1}/${rtConfigs.length}: ${rtConfigs[i].cfg.coin}...`;
     renderRealtime();
@@ -2558,13 +2554,30 @@ function renderRealtime(){
   const el=document.getElementById('rtSection');
   if(!el) return;
 
-  // 3 mức: SIGNAL (xanh) · WAIT_RSI (cam) · còn lại = không vào được (đỏ mờ)
-  const canEnter=s=>s==='SIGNAL'||s==='WAIT_RSI';
+  // Helper tạo detail text khi click ❌
+  function rtDetailHtml(d){
+    const parts=[];
+    if(d.rsiVal!=null) parts.push(`RSI: <b>${d.rsiVal}</b> (ngưỡng ${d.level})`);
+    if(d.macdHist!=null) parts.push(`MACD ${(d.macdTf||'').toUpperCase()}: <b style="color:${d.macdHist>=0?'var(--grn)':'var(--red)'};">${d.macdHist>=0?'+':''}${d.macdHist.toFixed(4)}</b>`);
+    if(d.trendHist!=null) parts.push(`Trend ${(d.trendTf||'').toUpperCase()}: <b style="color:${d.trendHist>=0?'var(--grn)':'var(--red)'};">${d.trendHist>=0?'+':''}${d.trendHist.toFixed(4)}</b>`);
+    return parts.join(' · ');
+  }
+
+  const mkCell=(d,key)=>{
+    if(!d) return '<span style="color:var(--b3);font-size:10px;">—</span>';
+    if(d.status==='DISABLED') return '<span style="color:var(--b3);font-size:10px;">—</span>';
+    if(d.status==='SIGNAL') return `<span style="color:var(--grn);font-size:12px;font-weight:800;display:block;">✅ RSI cắt ${d.dir==='buy'?'↑':'↓'} ${d.level} · RSI: ${d.rsiVal}</span>`;
+    if(d.status==='WAIT_RSI') return `<span style="color:var(--ora);font-size:11px;font-weight:700;display:block;">⏳ Chờ RSI ${d.dir==='buy'?'↑':'↓'} ${d.level} · hiện: ${d.rsiVal}</span>`;
+    // ❌ X — clickable để xem chi tiết
+    const exp=rtExpanded.has(key);
+    const detHtml=exp?`<div style="margin-top:5px;font-size:10px;color:var(--dim);font-weight:400;line-height:1.8;border-top:1px solid rgba(220,38,38,.2);padding-top:4px;">${rtDetailHtml(d)}</div>`:'';
+    return `<span onclick="rtExpanded.has('${key}')?rtExpanded.delete('${key}'):rtExpanded.add('${key}');renderRealtime()" style="cursor:pointer;display:block;font-size:11px;font-weight:700;color:var(--red);user-select:none;">❌ <span style="font-size:10px;font-weight:400;color:var(--dim);">${exp?'▲ ẩn':'▼ xem'}</span>${detHtml}</span>`;
+  };
 
   let resHtml='';
   if(rtResults.length>0){
     const signalCount=rtResults.filter(r=>r.long?.status==='SIGNAL'||r.short?.status==='SIGNAL').length;
-    const waitCount=rtResults.filter(r=>!r.error&&!r.long?.status!=='SIGNAL'&&(r.long?.status==='WAIT_RSI'||r.short?.status==='WAIT_RSI')).length;
+    const waitCount=rtResults.filter(r=>!r.error&&!r.long?.status==='SIGNAL'&&!r.short?.status==='SIGNAL'&&(r.long?.status==='WAIT_RSI'||r.short?.status==='WAIT_RSI')).length;
     resHtml=`
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
       <div style="background:rgba(22,163,74,.1);border:1px solid var(--grn);border-radius:8px;padding:6px 14px;font-size:12px;font-weight:800;color:var(--grn);">✅ Tín hiệu: ${signalCount}</div>
@@ -2584,19 +2597,12 @@ function renderRealtime(){
       const isSignal=r.long?.status==='SIGNAL'||r.short?.status==='SIGNAL';
       const isWait=!isSignal&&(r.long?.status==='WAIT_RSI'||r.short?.status==='WAIT_RSI');
       const cfgSum=`RSI ${(cfg.rsiTf||'').toUpperCase()}${cfg.macdAuto!==false?' · MACD '+(cfg.macdTf||'').toUpperCase():''}${cfg.macdTrendTf&&cfg.macdTrendTf!=='none'?' · T:'+(cfg.macdTrendTf||'').toUpperCase():''}`;
-      const mkCell=d=>{
-        if(!d) return '<span style="color:var(--b3);font-size:10px;">—</span>';
-        if(d.status==='SIGNAL') return `<span style="color:var(--grn);font-size:12px;font-weight:800;display:block;">✅ ${d.msg}</span>`;
-        if(d.status==='WAIT_RSI'||d.status==='NO_SIGNAL') return `<span style="color:var(--ora);font-size:11px;font-weight:700;display:block;">⏳ ${d.msg}</span>`;
-        if(d.status==='DISABLED') return `<span style="color:var(--b3);font-size:10px;">—</span>`;
-        return `<span style="display:block;font-size:11px;font-weight:700;color:var(--red);">❌ <span style="color:var(--dim);font-size:10px;font-weight:400;">${d.msg}</span></span>`;
-      };
       resHtml+=`<tr style="${isSignal?'background:rgba(22,163,74,.06);':isWait?'background:rgba(217,119,6,.04);':''}">
         <td style="color:var(--dim)">${i+1}</td>
         <td style="font-weight:800;color:var(--hi);font-family:'JetBrains Mono',monospace;font-size:11px;">${rtDisplayName(r.filename)}</td>
         <td style="font-size:10px;color:var(--dim)">${cfgSum}</td>
-        <td>${r.error?`<span style="color:var(--red);font-size:10px">⚠️ ${esc(r.error)}</span>`:mkCell(r.long)}</td>
-        <td>${r.error?'':mkCell(r.short)}</td>
+        <td>${r.error?`<span style="color:var(--red);font-size:10px">⚠️ ${esc(r.error)}</span>`:mkCell(r.long,i+'_L')}</td>
+        <td>${r.error?'':mkCell(r.short,i+'_S')}</td>
         <td style="font-size:10px;color:var(--dim)">${r.lastCandleTime}</td>
       </tr>`;
     });
