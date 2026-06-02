@@ -2474,29 +2474,32 @@ async function rtScanOne(item){
   const sym=(cfg.coin||'').toUpperCase();
   const result={filename,sym,cfg,long:null,short:null,error:null,lastCandleTime:'—'};
   try{
-    const rsiCandles=await fetchKlinesLatest(sym,cfg.rsiTf||'1h',150);
+    const rsiCandles=await fetchKlinesLatest(sym,cfg.rsiTf||'1h',152);
     if(!rsiCandles||rsiCandles.length<5) throw new Error('Không đủ data nến');
-    const closes=rsiCandles.map(c=>parseFloat(c[4]));
+    // Bỏ nến cuối (đang mở) — chỉ làm việc với nến đã đóng
+    const rsiClosed=rsiCandles.slice(0,-1);
+    const closes=rsiClosed.map(c=>parseFloat(c[4]));
     const n=closes.length;
-    const lastIdx=n-2; // nến đã đóng gần nhất
-    const prevIdx=n-3; // nến trước đó
-    const ts=rsiCandles[lastIdx][0];
+    const lastIdx=n-1; // nến đã đóng gần nhất
+    const prevIdx=n-2; // nến trước đó
+    const ts=rsiClosed[lastIdx][0];
 
     // Thời gian nến đóng
     const d=new Date(ts);
     result.lastCandleTime=pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes());
 
-    // MACD
+    // MACD — fetch 201 nến, bỏ nến cuối (đang mở chưa đóng) để tính histogram chính xác
     let macdMap=null,lookupFn=null,trendMap=null;
     const trendTf=cfg.macdTrendTf||'none';
     if(cfg.macdAuto!==false&&cfg.macdTf){
-      const mc=await fetchKlinesLatest(sym,cfg.macdTf,200);
+      const mc=await fetchKlinesLatest(sym,cfg.macdTf,201);
+      const mcClosed=mc.slice(0,-1); // chỉ dùng nến đã đóng
       const pMs=MACD_INTRADAY_MS[cfg.macdTf];
-      if(pMs){macdMap=buildMacdMapIntraday(mc,pMs);lookupFn=(m,t)=>getMacdHistIntraday(m,t,pMs);}
-      else{macdMap=buildMacdMap(mc);lookupFn=getMacdHist;}
+      if(pMs){macdMap=buildMacdMapIntraday(mcClosed,pMs);lookupFn=(m,t)=>getMacdHistIntraday(m,t,pMs);}
+      else{macdMap=buildMacdMap(mcClosed);lookupFn=getMacdHist;}
       if(trendTf!=='none'){
-        const tc=await fetchKlinesLatest(sym,trendTf,200);
-        trendMap=buildMacdMap(tc);
+        const tc=await fetchKlinesLatest(sym,trendTf,201);
+        trendMap=buildMacdMap(tc.slice(0,-1)); // chỉ dùng nến đã đóng
       }
     }
 
