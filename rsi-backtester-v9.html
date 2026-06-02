@@ -2558,14 +2558,13 @@ function renderRealtime(){
   const el=document.getElementById('rtSection');
   if(!el) return;
 
-  const stColor=s=>s==='SIGNAL'?'var(--grn)':s==='WAIT_RSI'?'var(--ora)':s==='MACD_BLOCK'?'#b91c1c':s==='TREND_BLOCK'?'#7c3aed':s==='DISABLED'?'var(--b3)':'var(--dim)';
-  const stBg=s=>s==='MACD_BLOCK'?'rgba(185,28,28,.08)':s==='TREND_BLOCK'?'rgba(124,58,237,.08)':'transparent';
-  const stIcon=s=>s==='SIGNAL'?'✅':s==='WAIT_RSI'?'⏳':s==='MACD_BLOCK'?'🔴':s==='TREND_BLOCK'?'🟣':s==='DISABLED'?'⊘':s==='NO_DATA'?'⚠️':'💤';
+  // 3 mức: SIGNAL (xanh) · WAIT_RSI (cam) · còn lại = không vào được (đỏ mờ)
+  const canEnter=s=>s==='SIGNAL'||s==='WAIT_RSI';
 
   let resHtml='';
   if(rtResults.length>0){
     const signalCount=rtResults.filter(r=>r.long?.status==='SIGNAL'||r.short?.status==='SIGNAL').length;
-    const waitCount=rtResults.filter(r=>!r.error&&(r.long?.status==='WAIT_RSI'||r.short?.status==='WAIT_RSI')).length;
+    const waitCount=rtResults.filter(r=>!r.error&&!r.long?.status!=='SIGNAL'&&(r.long?.status==='WAIT_RSI'||r.short?.status==='WAIT_RSI')).length;
     resHtml=`
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
       <div style="background:rgba(22,163,74,.1);border:1px solid var(--grn);border-radius:8px;padding:6px 14px;font-size:12px;font-weight:800;color:var(--grn);">✅ Tín hiệu: ${signalCount}</div>
@@ -2583,9 +2582,15 @@ function renderRealtime(){
     rtResults.forEach((r,i)=>{
       const cfg=r.cfg;
       const isSignal=r.long?.status==='SIGNAL'||r.short?.status==='SIGNAL';
+      const isWait=!isSignal&&(r.long?.status==='WAIT_RSI'||r.short?.status==='WAIT_RSI');
       const cfgSum=`RSI ${(cfg.rsiTf||'').toUpperCase()}${cfg.macdAuto!==false?' · MACD '+(cfg.macdTf||'').toUpperCase():''}${cfg.macdTrendTf&&cfg.macdTrendTf!=='none'?' · T:'+(cfg.macdTrendTf||'').toUpperCase():''}`;
-      const mkCell=d=>d?`<span style="color:${stColor(d.status)};font-size:11px;font-weight:700;display:block;background:${stBg(d.status)};border-radius:5px;padding:${stBg(d.status)!=='transparent'?'3px 6px':'0'};">${stIcon(d.status)} ${d.msg}</span>`:'<span style="color:var(--dim);font-size:10px;">TẮT</span>';
-      resHtml+=`<tr style="${isSignal?'background:rgba(22,163,74,.06);':''}" >
+      const mkCell=d=>{
+        if(!d) return '<span style="color:var(--b3);font-size:10px;">—</span>';
+        if(d.status==='SIGNAL') return `<span style="color:var(--grn);font-size:12px;font-weight:800;display:block;">✅ ${d.msg}</span>`;
+        if(d.status==='WAIT_RSI') return `<span style="color:var(--ora);font-size:11px;font-weight:700;display:block;">⏳ ${d.msg}</span>`;
+        return `<span style="display:block;font-size:11px;font-weight:700;color:var(--red);">❌ <span style="color:var(--dim);font-size:10px;font-weight:400;">${d.msg}</span></span>`;
+      };
+      resHtml+=`<tr style="${isSignal?'background:rgba(22,163,74,.06);':isWait?'background:rgba(217,119,6,.04);':''}">`;
         <td style="color:var(--dim)">${i+1}</td>
         <td style="font-weight:800;color:var(--hi);font-family:'JetBrains Mono',monospace;font-size:11px;">${rtDisplayName(r.filename)}</td>
         <td style="font-size:10px;color:var(--dim)">${cfgSum}</td>
