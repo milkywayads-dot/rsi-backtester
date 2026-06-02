@@ -2505,13 +2505,17 @@ async function rtScanOne(item){
     }
 
     // Long
-    if(cfg.longEnabled!==false&&cfg.long){
+    if(cfg.longEnabled===false){
+      result.long={status:'DISABLED',msg:'LONG TẮT trong cấu hình'};
+    } else if(cfg.long){
       const rsiL=calcRSI(closes,parseInt(cfg.long.rsiPeriod)||14);
       result.long=rtCheckDir('buy',cfg.long,rsiL,prevIdx,lastIdx,ts,macdMap,lookupFn,trendMap,trendTf,cfg.macdAuto,cfg.macdTf);
       result.long.rsiCur=rsiL[n-1]?.toFixed(1);
     }
     // Short
-    if(cfg.shortEnabled!==false&&cfg.short){
+    if(cfg.shortEnabled===false){
+      result.short={status:'DISABLED',msg:'SHORT TẮT trong cấu hình'};
+    } else if(cfg.short){
       const rsiS=calcRSI(closes,parseInt(cfg.short.rsiPeriod)||14);
       result.short=rtCheckDir('sell',cfg.short,rsiS,prevIdx,lastIdx,ts,macdMap,lookupFn,trendMap,trendTf,cfg.macdAuto,cfg.macdTf);
       result.short.rsiCur=rsiS[n-1]?.toFixed(1);
@@ -2524,7 +2528,7 @@ async function rtScanOne(item){
 async function runRealtime(){
   if(!rtConfigs.length){alert('Chưa load file cấu hình!');return;}
   rtLoading=true;rtResults=[];
-  const priority={SIGNAL:0,WAIT_RSI:1,MACD_BLOCK:2,TREND_BLOCK:3,NO_SIGNAL:4,NO_DATA:5};
+  const priority={SIGNAL:0,WAIT_RSI:1,MACD_BLOCK:2,TREND_BLOCK:3,NO_SIGNAL:4,NO_DATA:5,DISABLED:6};
   for(let i=0;i<rtConfigs.length;i++){
     rtStatus=`Đang quét ${i+1}/${rtConfigs.length}: ${rtConfigs[i].cfg.coin}...`;
     renderRealtime();
@@ -2554,9 +2558,9 @@ function renderRealtime(){
   const el=document.getElementById('rtSection');
   if(!el) return;
 
-  const stColor=s=>s==='SIGNAL'?'var(--grn)':s==='WAIT_RSI'?'var(--ora)':s==='MACD_BLOCK'?'#b91c1c':s==='TREND_BLOCK'?'#7c3aed':'var(--dim)';
+  const stColor=s=>s==='SIGNAL'?'var(--grn)':s==='WAIT_RSI'?'var(--ora)':s==='MACD_BLOCK'?'#b91c1c':s==='TREND_BLOCK'?'#7c3aed':s==='DISABLED'?'var(--b3)':'var(--dim)';
   const stBg=s=>s==='MACD_BLOCK'?'rgba(185,28,28,.08)':s==='TREND_BLOCK'?'rgba(124,58,237,.08)':'transparent';
-  const stIcon=s=>s==='SIGNAL'?'✅':s==='WAIT_RSI'?'⏳':s==='MACD_BLOCK'?'🔴':s==='TREND_BLOCK'?'🟣':s==='NO_DATA'?'⚠️':'💤';
+  const stIcon=s=>s==='SIGNAL'?'✅':s==='WAIT_RSI'?'⏳':s==='MACD_BLOCK'?'🔴':s==='TREND_BLOCK'?'🟣':s==='DISABLED'?'⊘':s==='NO_DATA'?'⚠️':'💤';
 
   let resHtml='';
   if(rtResults.length>0){
