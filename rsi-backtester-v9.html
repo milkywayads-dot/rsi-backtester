@@ -564,9 +564,14 @@ async function fetchKlines(symbol, startTs, endTs, interval='1h'){
   const spotBase='https://api.binance.com/api/v3/klines';
   const futBase ='https://fapi.binance.com/fapi/v1/klines';
   let base=spotBase;
-  const testUrl=`${spotBase}?symbol=${symbol}&interval=${interval}&startTime=${startTs}&endTime=${endTs}&limit=1`;
-  const testRes=await fetch(testUrl);
-  if(!testRes.ok) base=futBase; // Spot lỗi → dùng Futures
+  try{
+    const testUrl=`${spotBase}?symbol=${symbol}&interval=${interval}&startTime=${startTs}&endTime=${endTs}&limit=1`;
+    const testRes=await fetch(testUrl);
+    await testRes.text(); // consume body — tránh connection leak trên Safari
+    if(!testRes.ok) base=futBase;
+  }catch(e){
+    base=futBase; // network error → thử futures
+  }
 
   const all=[];let cur=startTs;
   while(cur<endTs){
