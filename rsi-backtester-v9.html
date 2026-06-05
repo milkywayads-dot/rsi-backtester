@@ -2498,10 +2498,13 @@ function loadRtFiles(input){
 // ── Fetch N nến mới nhất — thử Spot trước, fallback sang Futures nếu lỗi ──────
 async function fetchKlinesLatest(sym,tf,limit){
   const spotUrl=`https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(sym)}&interval=${tf}&limit=${limit}`;
-  const r=await fetch(spotUrl);
-  if(r.ok) return await r.json();
-  // Spot lỗi → thử Futures (USDM)
   const futUrl=`https://fapi.binance.com/fapi/v1/klines?symbol=${encodeURIComponent(sym)}&interval=${tf}&limit=${limit}`;
+  try{
+    const r=await fetch(spotUrl);
+    if(r.ok) return await r.json();
+    await r.text(); // consume body — tránh connection leak trên Safari
+  }catch(e){}
+  // Spot lỗi hoặc không tồn tại → thử Futures (USDM)
   const r2=await fetch(futUrl);
   if(!r2.ok) throw new Error(`HTTP ${r2.status} (Spot+Futures)`);
   return await r2.json();
