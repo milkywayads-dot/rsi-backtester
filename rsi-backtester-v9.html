@@ -2537,7 +2537,7 @@ async function rtScanOne(item){
   const sym=(cfg.coin||'').toUpperCase();
   const result={filename,sym,cfg,long:null,short:null,error:null,lastCandleTime:'—'};
   try{
-    const rsiCandles=await fetchKlinesLatest(sym,cfg.rsiTf||'1h',152);
+    const rsiCandles=await fetchKlinesLatest(sym,cfg.rsiTf||'1h',301);
     if(!rsiCandles||rsiCandles.length<5) throw new Error('Không đủ data nến');
     // Bỏ nến cuối (đang mở) — chỉ làm việc với nến đã đóng
     const rsiClosed=rsiCandles.slice(0,-1);
