@@ -309,6 +309,51 @@ function parseExitKey(str){
   if(!m) return 9999999999999;
   return parseInt(m[3])*100000000+parseInt(m[2])*1000000+parseInt(m[1])*10000+parseInt(m[4])*100+parseInt(m[5]);
 }
+// ── Load hàng loạt: xóa slots cũ, tạo slot mới từ nhiều file JSON ────────────
+function loadAllSlotConfigs(input){
+  const files=Array.from(input.files);
+  if(!files.length) return;
+  let loaded=0;
+  const parsed=[];
+  files.forEach((file,idx)=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      try{
+        const cfg=JSON.parse(e.target.result);
+        if(cfg.coin) parsed.push({idx,cfg});
+      }catch(err){}
+      loaded++;
+      if(loaded===files.length){
+        parsed.sort((a,b)=>a.idx-b.idx);
+        if(!parsed.length) return;
+        slots=[];
+        slotIdCnt=0;
+        parsed.forEach(({cfg})=>{
+          slotIdCnt++;
+          const s=mkSlot(slotIdCnt);
+          s.expanded=false;
+          if(cfg.coin!==undefined) s.coin=cfg.coin.toUpperCase().trim();
+          if(cfg.sizeUsd!==undefined) s.sizeUsd=cfg.sizeUsd;
+          if(cfg.leverage!==undefined) s.leverage=cfg.leverage;
+          if(cfg.maxOrders!==undefined) s.maxOrders=cfg.maxOrders;
+          if(cfg.macdTf!==undefined) s.macdTf=cfg.macdTf;
+          if(cfg.rsiTf!==undefined) s.rsiTf=cfg.rsiTf;
+          if(cfg.macdAuto!==undefined) s.macdAuto=cfg.macdAuto;
+          if(cfg.macdTrendTf!==undefined) s.macdTrendTf=cfg.macdTrendTf;
+          if(cfg.long) s.long={...s.long,...cfg.long};
+          if(cfg.short) s.short={...s.short,...cfg.short};
+          if(cfg.longEnabled!==undefined) s.longEnabled=cfg.longEnabled;
+          if(cfg.shortEnabled!==undefined) s.shortEnabled=cfg.shortEnabled;
+          slots.push(s);
+        });
+        renderMultiSlot();
+      }
+    };
+    reader.readAsText(file);
+  });
+  input.value='';
+}
+
 function saveSlotConfig(slotId){
   const s=slots.find(x=>x.id===slotId);if(!s) return;
   const def=s.coin.replace('USDT','')+'_cfg';
@@ -2353,14 +2398,27 @@ function renderMultiSlot(){
 
     ${slots.map(s=>s.expanded?renderSlotExpanded(s):renderSlotCollapsed(s)).join('')}
 
-    <div onclick="addSlot()" style="
-      display:flex;align-items:center;justify-content:center;gap:8px;
-      padding:10px;border:1.5px dashed var(--b2);border-radius:10px;
-      color:var(--dim);font-size:12px;font-weight:700;cursor:pointer;
-      margin-bottom:12px;transition:border-color .15s;letter-spacing:.5px;"
-      onmouseover="this.style.borderColor='var(--cyn)'"
-      onmouseout="this.style.borderColor='var(--b2)'">
-      + THÊM SLOT
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <div onclick="addSlot()" style="
+        flex:1;display:flex;align-items:center;justify-content:center;gap:8px;
+        padding:10px;border:1.5px dashed var(--b2);border-radius:10px;
+        color:var(--dim);font-size:12px;font-weight:700;cursor:pointer;
+        transition:border-color .15s;letter-spacing:.5px;"
+        onmouseover="this.style.borderColor='var(--cyn)'"
+        onmouseout="this.style.borderColor='var(--b2)'">
+        + THÊM SLOT
+      </div>
+      <label style="
+        flex:1;display:flex;align-items:center;justify-content:center;gap:8px;
+        padding:10px;border:1.5px dashed var(--acc);border-radius:10px;
+        color:var(--acc);font-size:12px;font-weight:700;cursor:pointer;
+        transition:border-color .15s;letter-spacing:.5px;"
+        onmouseover="this.style.borderColor='var(--cyn)';this.style.color='var(--cyn)'"
+        onmouseout="this.style.borderColor='var(--acc)';this.style.color='var(--acc)'"
+        title="Chọn nhiều file JSON — xóa slots cũ và tạo lại toàn bộ">
+        📂 LOAD HÀNG LOẠT
+        <input type="file" accept=".json" multiple onchange="loadAllSlotConfigs(this)" style="display:none">
+      </label>
     </div>
 
     ${multiSlotStatus?`<div class="status-box" id="msStatusLine">${esc(multiSlotStatus)}</div>`:'<div id="msStatusLine"></div>'}
