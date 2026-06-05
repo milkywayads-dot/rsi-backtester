@@ -329,6 +329,7 @@ function loadSlotConfig(slotId,input){
     try{
       const cfg=JSON.parse(e.target.result);
       const s=slots.find(x=>x.id===slotId);if(!s) return;
+      if(cfg.coin!==undefined) s.coin=cfg.coin.toUpperCase().trim();
       if(cfg.sizeUsd!==undefined) s.sizeUsd=cfg.sizeUsd;
       if(cfg.leverage!==undefined) s.leverage=cfg.leverage;
       if(cfg.maxOrders!==undefined) s.maxOrders=cfg.maxOrders;
