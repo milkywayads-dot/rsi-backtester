@@ -649,7 +649,7 @@ async function runSession(){
   try{
     for(const sym of syms){
       setStatus('⏳ '+sym+': đang kết nối Binance...');
-      const candles=await fetchKlines(sym,startTs,endTs,rsiTF);
+      const candles=await fetchKlines(sym,startTs-RSI_WARM_UP*(RSI_TF_MS[rsiTF]||3600000),endTs,rsiTF);
 
       let trades;
       if(macdTf==='none'){
@@ -1290,6 +1290,8 @@ function getMacdHist(macdMap, tsMs){
 const MACD_INTRADAY_MS={'1h':3600000,'2h':7200000,'4h':14400000};
 const MACD_TF_MS={'1h':3600000,'2h':7200000,'4h':14400000,'1d':86400000,'3d':259200000,'1w':604800000};
 const MACD_WARM_UP=200; // số nến warm-up EMA cho mọi khung TF
+const RSI_TF_MS={'5m':300000,'15m':900000,'30m':1800000,'1h':3600000,'2h':7200000,'4h':14400000};
+const RSI_WARM_UP=300; // số nến warm-up RSI trước startTs
 function buildMacdMapIntraday(candles, periodMs){
   const closes=candles.map(c=>parseFloat(c[4]));
   const opens =candles.map(c=>c[0]);
@@ -1471,7 +1473,7 @@ async function runOptimizer(){
   const macdTrendMapByTf={};
 
   try{
-    candles1H=await fetchKlines(optState.coin,startTs,endTs,optState.rsiTF||'1h');
+    candles1H=await fetchKlines(optState.coin,startTs-RSI_WARM_UP*(RSI_TF_MS[optState.rsiTF||'1h']||3600000),endTs,optState.rsiTF||'1h');
     for(const tf of tfMacd){
       optState.statusMsg=`Đang tải nến ${tf.toUpperCase()} (MACD Trading)...`;
       renderOptimizer();
@@ -1960,7 +1962,7 @@ async function runMultiSlot(){
       const sym=slot.coin.toUpperCase().trim();
 
       setMultiStatus('⏳ '+sym+': tải nến RSI '+slot.rsiTf.toUpperCase()+'...');
-      const candles=await fetchKlines(sym,startTs,endTs,slot.rsiTf);
+      const candles=await fetchKlines(sym,startTs-RSI_WARM_UP*(RSI_TF_MS[slot.rsiTf]||3600000),endTs,slot.rsiTf);
 
       let macdMap=null, lookupFn=null, trendMap=null;
       const slotTrendTf=slot.macdTrendTf||'none';
@@ -2480,12 +2482,16 @@ function loadRtFiles(input){
   input.value='';
 }
 
-// ── Fetch N nến mới nhất (không cần range) ───────────────────────────────────
+// ── Fetch N nến mới nhất — thử Spot trước, fallback sang Futures nếu lỗi ──────
 async function fetchKlinesLatest(sym,tf,limit){
-  const url=`https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(sym)}&interval=${tf}&limit=${limit}`;
-  const r=await fetch(url);
-  if(!r.ok) throw new Error(`HTTP ${r.status}`);
-  return await r.json();
+  const spotUrl=`https://api.binance.com/api/v3/klines?symbol=${encodeURIComponent(sym)}&interval=${tf}&limit=${limit}`;
+  const r=await fetch(spotUrl);
+  if(r.ok) return await r.json();
+  // Spot lỗi → thử Futures (USDM)
+  const futUrl=`https://fapi.binance.com/fapi/v1/klines?symbol=${encodeURIComponent(sym)}&interval=${tf}&limit=${limit}`;
+  const r2=await fetch(futUrl);
+  if(!r2.ok) throw new Error(`HTTP ${r2.status} (Spot+Futures)`);
+  return await r2.json();
 }
 
 // ── Kiểm tra 1 chiều lệnh ────────────────────────────────────────────────────
