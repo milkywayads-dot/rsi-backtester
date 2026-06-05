@@ -560,9 +560,17 @@ function backtestReverse(candles, startDir, startTs, endTs, rsiLevel, tpPct, slP
 //  FETCH BINANCE
 // ══════════════════════════════════════════════
 async function fetchKlines(symbol, startTs, endTs, interval='1h'){
+  // Xác định base URL: thử Spot trước, fallback Futures nếu lỗi
+  const spotBase='https://api.binance.com/api/v3/klines';
+  const futBase ='https://fapi.binance.com/fapi/v1/klines';
+  let base=spotBase;
+  const testUrl=`${spotBase}?symbol=${symbol}&interval=${interval}&startTime=${startTs}&endTime=${endTs}&limit=1`;
+  const testRes=await fetch(testUrl);
+  if(!testRes.ok) base=futBase; // Spot lỗi → dùng Futures
+
   const all=[];let cur=startTs;
   while(cur<endTs){
-    const url=`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&startTime=${cur}&endTime=${endTs}&limit=1000`;
+    const url=`${base}?symbol=${symbol}&interval=${interval}&startTime=${cur}&endTime=${endTs}&limit=1000`;
     const res=await fetch(url);
     if(!res.ok) throw new Error(symbol+': HTTP '+res.status);
     const chunk=await res.json();
