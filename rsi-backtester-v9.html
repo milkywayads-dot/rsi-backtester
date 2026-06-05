@@ -2655,7 +2655,7 @@ function renderRealtime(){
   let resHtml='';
   if(rtResults.length>0){
     const signalCount=rtResults.filter(r=>r.long?.status==='SIGNAL'||r.short?.status==='SIGNAL').length;
-    const waitCount=rtResults.filter(r=>!r.error&&!r.long?.status==='SIGNAL'&&!r.short?.status==='SIGNAL'&&(r.long?.status==='WAIT_RSI'||r.short?.status==='WAIT_RSI')).length;
+    const waitCount=rtResults.filter(r=>!r.error&&r.long?.status!=='SIGNAL'&&r.short?.status!=='SIGNAL'&&(r.long?.status==='WAIT_RSI'||r.short?.status==='WAIT_RSI')).length;
     resHtml=`
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
       <div style="background:rgba(22,163,74,.1);border:1px solid var(--grn);border-radius:8px;padding:6px 14px;font-size:12px;font-weight:800;color:var(--grn);">✅ Tín hiệu: ${signalCount}</div>
