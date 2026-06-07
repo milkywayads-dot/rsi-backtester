@@ -507,7 +507,6 @@ async function fetchKlines(symbol, startTs, endTs, interval='1h'){
     const chunk=await res.json();
     if(!chunk.length) break;
     all.push(...chunk);
-    setStatus('⏳ '+symbol+': tải '+all.length+' nến ['+interval+']...');
     if(chunk.length<1000) break;
     cur=chunk[chunk.length-1][0]+1;
   }
