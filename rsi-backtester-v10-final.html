@@ -637,9 +637,11 @@ function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, 
     }
 
     // ── MACD Trend filter (xác nhận xu hướng, luôn thuận chiều) ─────────────
+    let trendHist=null;
     if(macdTrendMap!==null){
       const th=trendLookupFn(macdTrendMap,times[i]);
       if(th===null) continue;
+      trendHist=th;
       if(dir==='buy'  && th<=0) continue;
       if(dir==='sell' && th>=0) continue;
     }
@@ -670,7 +672,9 @@ function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, 
       entry:entry>100?entry.toFixed(2):entry.toFixed(4),
       tp:tp>100?tp.toFixed(2):tp.toFixed(4),
       sl:sl>100?sl.toFixed(2):sl.toFixed(4),
-      rsi:rsi[i].toFixed(2), result, pnl
+      rsi:rsi[i].toFixed(2), result, pnl,
+      macdHist:hist!==undefined?hist:null,
+      trendHist
     });
   }
   return trades;
@@ -1640,7 +1644,7 @@ function renderMultiSlot(){
           <th>#</th><th>Slot·Coin</th>
           <th onclick="setSortMs('entry')" style="${thStyle}">T. vào${entryArrow}</th>
           <th onclick="setSortMs('exit')" style="${thStyle}">T. thoát${exitArrow}</th>
-          <th>Hướng</th><th>Giá vào</th><th>RSI</th><th>PnL%</th><th>Net $</th><th>KQ</th>
+          <th>Hướng</th><th>Giá vào</th><th>RSI</th><th>MACD</th><th>Trend</th><th>PnL%</th><th>Net $</th><th>KQ</th>
         </tr></thead>
         <tbody>`;
     disp.forEach((t,i)=>{
@@ -1662,6 +1666,8 @@ function renderMultiSlot(){
         <td style="color:${dc};font-weight:700">${t.dir==='buy'?'▲ L':'▼ S'}</td>
         <td style="color:var(--hi)">${t.entry}</td>
         <td style="color:var(--acc)">${t.rsi}</td>
+        <td style="font-family:'JetBrains Mono',monospace;font-size:10px;color:${t.macdHist!=null?(t.macdHist>0?'var(--grn)':'var(--red)'):'var(--dim)'}">${t.macdHist!=null?(t.macdHist>0?'+':'')+t.macdHist.toFixed(4):'—'}</td>
+        <td style="font-family:'JetBrains Mono',monospace;font-size:10px;color:${t.trendHist!=null?(t.trendHist>0?'var(--grn)':'var(--red)'):'var(--dim)'}">${t.trendHist!=null?(t.trendHist>0?'+':'')+t.trendHist.toFixed(4):'—'}</td>
         <td style="color:${pc};font-weight:700">${ps}</td>
         <td>${netDHtml}</td>
         <td><span class="badge ${bk}">${t.result}</span></td>
