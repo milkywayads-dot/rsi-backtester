@@ -729,10 +729,8 @@ async function runOptimizer(){
   const macdMapByTf={};
   const macdTrendMapByTf={};
 
-  const macdClosedByTf={};
-  const macdHistByTf={};
-  const macdTrendClosedByTf={};
-  const macdTrendHistByTf={};
+  const macdLookupMapByTf={};
+  const macdTrendLookupMapByTf={};
 
   try{
     candles1H=await fetchKlines(optState.coin,startTs-RSI_WARM_UP*(RSI_TF_MS[optState.rsiTF||'1h']||3600000),endTs,optState.rsiTF||'1h');
@@ -740,20 +738,26 @@ async function runOptimizer(){
       optState.statusMsg=`Đang tải nến ${tf.toUpperCase()} (MACD Trading)...`;
       renderOptimizer();
       const startD=startTs-MACD_WARM_UP*(MACD_TF_MS[tf]||86400000);
+      const pMs=MACD_TF_MS[tf]||86400000;
       const raw=await fetchKlines(optState.coin,startD,endTs,tf);
       const closed=raw.slice(0,-1);
-      macdClosedByTf[tf]=closed;
-      macdHistByTf[tf]=calcMacdHist(closed.map(c=>parseFloat(c[4])));
+      const hist=calcMacdHist(closed.map(c=>parseFloat(c[4])));
+      const m=new Map();
+      closed.forEach((c,i)=>m.set(Math.floor(c[0]/pMs),hist[i]));
+      macdLookupMapByTf[tf]={map:m,pMs};
     }
     // ── MACD Trend maps (1D/3D/1W) ────────────────────────────────────────────
     for(const tf of selectedTrendTfs){
       optState.statusMsg=`Đang tải nến ${tf.toUpperCase()} (MACD Trend)...`;
       renderOptimizer();
       const startD=startTs-MACD_WARM_UP*(MACD_TF_MS[tf]||86400000);
+      const pMs=MACD_TF_MS[tf]||86400000;
       const rawTrend=await fetchKlines(optState.coin,startD,endTs,tf);
       const closedTrend=rawTrend.slice(0,-1);
-      macdTrendClosedByTf[tf]=closedTrend;
-      macdTrendHistByTf[tf]=calcMacdHist(closedTrend.map(c=>parseFloat(c[4])));
+      const histTrend=calcMacdHist(closedTrend.map(c=>parseFloat(c[4])));
+      const mt=new Map();
+      closedTrend.forEach((c,i)=>mt.set(Math.floor(c[0]/pMs),histTrend[i]));
+      macdTrendLookupMapByTf[tf]={map:mt,pMs};
     }
   }catch(e){
     optState.statusMsg='❌ Lỗi: '+e.message;
@@ -787,11 +791,9 @@ async function runOptimizer(){
   }
 
   for(const {trading:mode, trendTf} of comboPairs){
-    const trendClosed=trendTf?macdTrendClosedByTf[trendTf]:null;
-    const trendHist=trendTf?macdTrendHistByTf[trendTf]:null;
-    const trendPeriodMs=trendTf?(MACD_TF_MS[trendTf]||86400000):86400000;
-    const trendLookupFn=trendClosed
-      ?(_,signalTs)=>{const idx=trendClosed.findLastIndex(c=>c[0]+trendPeriodMs<=signalTs);return idx>=0?trendHist[idx]:null;}
+    const trendEntry=trendTf?macdTrendLookupMapByTf[trendTf]:null;
+    const trendLookupFn=trendEntry
+      ?(_,signalTs)=>trendEntry.map.get(Math.floor(signalTs/trendEntry.pMs)-1)??null
       :null;
     for(const period of OPT_RSI_PERIODS){
       for(const dir of OPT_DIRS){
@@ -802,16 +804,11 @@ async function runOptimizer(){
               if(mode.label==='none'){
                 trades=backtest(candles1H,dir,startTs,endTs,rsi,tp,sl,optState.maxOrders,period);
               } else {
-                const macdPeriodMs=MACD_TF_MS[mode.tf]||86400000;
-                const closedMacd=macdClosedByTf[mode.tf];
-                const histMacd=macdHistByTf[mode.tf];
-                const lookupFn=(_,signalTs)=>{
-                  const idx=closedMacd.findLastIndex(c=>c[0]+macdPeriodMs<=signalTs);
-                  return idx>=0?histMacd[idx]:null;
-                };
+                const macdEntry=macdLookupMapByTf[mode.tf];
+                const lookupFn=(_,signalTs)=>macdEntry.map.get(Math.floor(signalTs/macdEntry.pMs)-1)??null;
                 trades=backtestWithMacd(candles1H,dir,startTs,endTs,rsi,tp,sl,optState.maxOrders,period,
                   null,mode.align,lookupFn,
-                  trendClosed,trendLookupFn);
+                  trendEntry,trendLookupFn);
               }
               const sum=summarize(trades);
               const wr=sum.closed>0?sum.wins/sum.closed*100:0;
@@ -1242,10 +1239,9 @@ async function runMultiSlot(){
         const rawMacd=await fetchKlines(sym,startMacd,endTs,slot.macdTf);
         const closedMacd=rawMacd.slice(0,-1);
         const histMacd=calcMacdHist(closedMacd.map(c=>parseFloat(c[4])));
-        lookupFn=(_,signalTs)=>{
-          const idx=closedMacd.findLastIndex(c=>c[0]+macdPeriodMs<=signalTs);
-          return idx>=0?histMacd[idx]:null;
-        };
+        const macdMapM=new Map();
+        closedMacd.forEach((c,i)=>macdMapM.set(Math.floor(c[0]/macdPeriodMs),histMacd[i]));
+        lookupFn=(_,signalTs)=>macdMapM.get(Math.floor(signalTs/macdPeriodMs)-1)??null;
         // ── MACD Trend fetch (chỉ khi Trading bật) ───────────────────────────
         if(slotTrendTf!=='none'){
           setMultiStatus('⏳ '+sym+': tải MACD Trend '+slotTrendTf.toUpperCase()+'...');
@@ -1254,11 +1250,9 @@ async function runMultiSlot(){
           const rawTrend=await fetchKlines(sym,startMacd2,endTs,slotTrendTf);
           const closedTrend=rawTrend.slice(0,-1);
           const histTrend=calcMacdHist(closedTrend.map(c=>parseFloat(c[4])));
-          trendMap=closedTrend;
-          trendMap._trendLookup=(_,signalTs)=>{
-            const idx=closedTrend.findLastIndex(c=>c[0]+trendPeriodMs<=signalTs);
-            return idx>=0?histTrend[idx]:null;
-          };
+          const trendMapM=new Map();
+          closedTrend.forEach((c,i)=>trendMapM.set(Math.floor(c[0]/trendPeriodMs),histTrend[i]));
+          trendMap={_trendLookup:(_,signalTs)=>trendMapM.get(Math.floor(signalTs/trendPeriodMs)-1)??null};
         }
       }
 
