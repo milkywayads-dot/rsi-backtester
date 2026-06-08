@@ -356,6 +356,35 @@ function saveSlotConfig(slotId){
   a.click();
   URL.revokeObjectURL(a.href);
 }
+function saveOptConfig(r){
+  const coin=optState.coin||'BTCUSDT';
+  const def=coin.replace('USDT','')+'_'+r.dir+'_rsi'+r.rsi;
+  const name=(prompt('Tên cấu hình:',def)||'').trim();
+  if(!name) return;
+  const isLong=r.dir==='buy';
+  const dirCfg={rsiPeriod:r.period,rsiLevel:r.rsi,tp:r.tp,sl:r.sl,macdAlign:r.align};
+  const cfg={
+    coin:coin,
+    sizeUsd:50,
+    leverage:30,
+    maxOrders:optState.maxOrders||1,
+    macdTf:r.macdTf==='none'?'1d':r.macdTf,
+    rsiTf:optState.rsiTF||'1h',
+    macdAuto:r.macdTf!=='none',
+    macdTrendTf:r.macdTrendTf||'none',
+    long:isLong?{...dirCfg}:{rsiPeriod:14,rsiLevel:55,tp:4,sl:2,macdAlign:'trend'},
+    short:!isLong?{...dirCfg}:{rsiPeriod:14,rsiLevel:45,tp:4,sl:2,macdAlign:'trend'},
+    longEnabled:isLong,
+    shortEnabled:!isLong
+  };
+  const blob=new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=name+'.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 function loadSlotConfig(slotId,input){
   const file=input.files[0];if(!file) return;
   const reader=new FileReader();
@@ -1147,7 +1176,7 @@ function renderOptimizer(){
         <thead><tr>
           <th>#</th><th>Trading</th><th>Trend</th><th>Period</th><th>Hướng</th>
           <th>RSI Lv</th><th>TP%</th><th>SL%</th><th>R:R</th>
-          <th>Lệnh</th><th>WIN</th><th>LOSS</th><th>WinRate</th><th>PnL</th><th>Net PnL</th>
+          <th>Lệnh</th><th>WIN</th><th>LOSS</th><th>WinRate</th><th>PnL</th><th>Net PnL</th><th></th>
         </tr></thead>
         <tbody>
         ${(()=>{
@@ -1187,6 +1216,8 @@ function renderOptimizer(){
               <td style="color:${wrc};font-weight:800">${r.wr}%</td>
               <td style="color:${pc};font-weight:800">${r.pnl>=0?'+':''}${r.pnl}%</td>
               ${(()=>{const net=r.pnl-(r.trades*feeRate);const nc=net>=0?'var(--grn)':'var(--red)';return `<td style="color:${nc};font-weight:800">${net>=0?'+':''}${net.toFixed(2)}%</td>`;})()}
+              <td><span onclick='saveOptConfig(${JSON.stringify(r).replace(/'/g,"\'")})'
+                style="font-size:11px;color:var(--grn);background:rgba(22,163,74,.08);border:1px solid var(--grn);border-radius:6px;padding:2px 7px;cursor:pointer;" title="Lưu cấu hình">💾</span></td>
             </tr>`;
           }).join('');
         })()}
