@@ -367,7 +367,7 @@ function saveOptConfig(r){
     coin:coin,
     sizeUsd:50,
     leverage:30,
-    maxOrders:optState.maxOrders||1,
+    maxOrders:optState.maxOrders,
     macdTf:r.macdTf==='none'?'1d':r.macdTf,
     rsiTf:optState.rsiTF||'1h',
     macdAuto:r.macdTf!=='none',
