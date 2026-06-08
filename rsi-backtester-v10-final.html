@@ -654,7 +654,7 @@ function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, 
       macdHist:hist!==undefined?hist:null,
       trendHist,
       macdCandleTs:macdTsLookup?macdTsLookup(null,times[i]):null,
-      trendCandleTs:trendTsLookup?trendTsLookup(null,times[i]):null
+      trendCandleTs:trendTsLookup?trendTsLookup(macdTrendMap,times[i]):null
     });
   }
   return trades;
