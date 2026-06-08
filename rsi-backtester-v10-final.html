@@ -567,6 +567,15 @@ function bsearchMacd(opens, hist, signalTs, periodMs){
   }
   return res>=0?hist[res]:null;
 }
+function bsearchMacdTs(opens, signalTs, periodMs){
+  let lo=0, hi=opens.length-1, res=-1;
+  while(lo<=hi){
+    const mid=(lo+hi)>>1;
+    if(opens[mid]+periodMs<=signalTs){res=mid;lo=mid+1;}
+    else hi=mid-1;
+  }
+  return res>=0?opens[res]:null;
+}
 
 const MACD_INTRADAY_MS={'1h':3600000,'2h':7200000,'4h':14400000};
 const MACD_TF_MS={'1h':3600000,'2h':7200000,'4h':14400000,'1d':86400000,'3d':259200000,'1w':604800000};
@@ -574,7 +583,7 @@ const MACD_WARM_UP=200;
 const RSI_TF_MS={'5m':300000,'15m':900000,'30m':1800000,'1h':3600000,'2h':7200000,'4h':14400000};
 const RSI_WARM_UP=300;
 
-function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, maxOrders, rsiPeriod, macdMap, align='trend', lookupFn=null, macdTrendMap=null, trendLookupFn=null){
+function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, maxOrders, rsiPeriod, macdMap, align='trend', lookupFn=null, macdTrendMap=null, trendLookupFn=null, macdTsLookup=null, trendTsLookup=null){
   const closes=candles.map(c=>parseFloat(c[4]));
   const highs =candles.map(c=>parseFloat(c[2]));
   const lows  =candles.map(c=>parseFloat(c[3]));
@@ -642,7 +651,9 @@ function backtestWithMacd(candles, dir, startTs, endTs, rsiLevel, tpPct, slPct, 
       sl:sl>100?sl.toFixed(2):sl.toFixed(4),
       rsi:rsi[i].toFixed(2), result, pnl,
       macdHist:hist!==undefined?hist:null,
-      trendHist
+      trendHist,
+      macdCandleTs:macdTsLookup?macdTsLookup(null,times[i]):null,
+      trendCandleTs:trendTsLookup?trendTsLookup(null,times[i]):null
     });
   }
   return trades;
@@ -1248,6 +1259,7 @@ async function runMultiSlot(){
         const histMacd=calcMacdHist(closedMacd.map(c=>parseFloat(c[4])));
         const opensMacd=closedMacd.map(c=>c[0]);
         lookupFn=(_,signalTs)=>bsearchMacd(opensMacd,histMacd,signalTs,macdPeriodMs);
+        const macdTsLookupFn=(_,signalTs)=>bsearchMacdTs(opensMacd,signalTs,macdPeriodMs);
         // ── MACD Trend fetch (chỉ khi Trading bật) ───────────────────────────
         if(slotTrendTf!=='none'){
           setMultiStatus('⏳ '+sym+': tải MACD Trend '+slotTrendTf.toUpperCase()+'...');
@@ -1257,7 +1269,10 @@ async function runMultiSlot(){
           const closedTrend=rawTrend.slice(0,-1);
           const histTrend=calcMacdHist(closedTrend.map(c=>parseFloat(c[4])));
           const opensTrend=closedTrend.map(c=>c[0]);
-          trendMap={_trendLookup:(_,signalTs)=>bsearchMacd(opensTrend,histTrend,signalTs,trendPeriodMs)};
+          trendMap={
+            _trendLookup:(_,signalTs)=>bsearchMacd(opensTrend,histTrend,signalTs,trendPeriodMs),
+            _trendTsLookup:(_,signalTs)=>bsearchMacdTs(opensTrend,signalTs,trendPeriodMs)
+          };
         }
       }
 
@@ -1271,7 +1286,8 @@ async function runMultiSlot(){
         ?backtestWithMacd(candles,'buy',startTs,endTs,
           parseFloat(slot.long.rsiLevel)||55,parseFloat(slot.long.tp)||4,parseFloat(slot.long.sl)||2,
           maxOrd,parseInt(slot.long.rsiPeriod)||14,macdMap,longAlign,lookupFn,
-          trendMap,(m,ts)=>m&&m._trendLookup?m._trendLookup(m,ts):null)
+          trendMap,(m,ts)=>m&&m._trendLookup?m._trendLookup(m,ts):null,
+          macdTsLookupFn,(m,ts)=>m&&m._trendTsLookup?m._trendTsLookup(m,ts):null)
         :backtestNoMacd(candles,'buy',startTs,endTs,
           parseFloat(slot.long.rsiLevel)||55,parseFloat(slot.long.tp)||4,parseFloat(slot.long.sl)||2,
           maxOrd,parseInt(slot.long.rsiPeriod)||14)
@@ -1282,7 +1298,8 @@ async function runMultiSlot(){
         ?backtestWithMacd(candles,'sell',startTs,endTs,
           parseFloat(slot.short.rsiLevel)||45,parseFloat(slot.short.tp)||4,parseFloat(slot.short.sl)||2,
           maxOrd,parseInt(slot.short.rsiPeriod)||14,macdMap,shortAlign,lookupFn,
-          trendMap,(m,ts)=>m&&m._trendLookup?m._trendLookup(m,ts):null)
+          trendMap,(m,ts)=>m&&m._trendLookup?m._trendLookup(m,ts):null,
+          macdTsLookupFn,(m,ts)=>m&&m._trendTsLookup?m._trendTsLookup(m,ts):null)
         :backtestNoMacd(candles,'sell',startTs,endTs,
           parseFloat(slot.short.rsiLevel)||45,parseFloat(slot.short.tp)||4,parseFloat(slot.short.sl)||2,
           maxOrd,parseInt(slot.short.rsiPeriod)||14)
@@ -1601,7 +1618,7 @@ function renderMultiSlot(){
           <th>#</th><th>Slot·Coin</th>
           <th onclick="setSortMs('entry')" style="${thStyle}">T. vào${entryArrow}</th>
           <th onclick="setSortMs('exit')" style="${thStyle}">T. thoát${exitArrow}</th>
-          <th>Hướng</th><th>Giá vào</th><th>RSI</th><th>MACD</th><th>Trend</th><th>PnL%</th><th>Net $</th><th>KQ</th>
+          <th>Hướng</th><th>Giá vào</th><th>RSI</th><th>MACD</th><th>MACD Nến</th><th>Trend</th><th>Trend Nến</th><th>PnL%</th><th>Net $</th><th>KQ</th>
         </tr></thead>
         <tbody>`;
     disp.forEach((t,i)=>{
@@ -1624,7 +1641,9 @@ function renderMultiSlot(){
         <td style="color:var(--hi)">${t.entry}</td>
         <td style="color:var(--acc)">${t.rsi}</td>
         <td style="font-family:'JetBrains Mono',monospace;font-size:10px;color:${t.macdHist!=null?(t.macdHist>0?'var(--grn)':'var(--red)'):'var(--dim)'}">${t.macdHist!=null?(t.macdHist>0?'+':'')+t.macdHist.toFixed(4):'—'}</td>
+        <td style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--dim)">${(()=>{if(!t.macdCandleTs)return'—';const d=new Date(t.macdCandleTs);return pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes());})()}</td>
         <td style="font-family:'JetBrains Mono',monospace;font-size:10px;color:${t.trendHist!=null?(t.trendHist>0?'var(--grn)':'var(--red)'):'var(--dim)'}">${t.trendHist!=null?(t.trendHist>0?'+':'')+t.trendHist.toFixed(4):'—'}</td>
+        <td style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--dim)">${(()=>{if(!t.trendCandleTs)return'—';const d=new Date(t.trendCandleTs);return pad(d.getDate())+'/'+pad(d.getMonth()+1)+' '+pad(d.getHours())+':'+pad(d.getMinutes());})()}</td>
         <td style="color:${pc};font-weight:700">${ps}</td>
         <td>${netDHtml}</td>
         <td><span class="badge ${bk}">${t.result}</span></td>
