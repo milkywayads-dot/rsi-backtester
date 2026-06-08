@@ -1248,7 +1248,7 @@ async function runMultiSlot(){
       setMultiStatus('⏳ '+sym+': tải nến RSI '+slot.rsiTf.toUpperCase()+'...');
       const candles=await fetchKlines(sym,startTs-RSI_WARM_UP*(RSI_TF_MS[slot.rsiTf]||3600000),endTs,slot.rsiTf);
 
-      let macdMap=null, lookupFn=null, trendMap=null;
+      let macdMap=null, lookupFn=null, trendMap=null, macdTsLookupFn=null;
       const slotTrendTf=slot.macdTrendTf||'none';
       if(slot.macdAuto!==false){
         setMultiStatus('⏳ '+sym+': tải MACD Trading '+slot.macdTf.toUpperCase()+'...');
