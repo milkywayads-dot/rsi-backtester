@@ -1259,7 +1259,7 @@ async function runMultiSlot(){
         const histMacd=calcMacdHist(closedMacd.map(c=>parseFloat(c[4])));
         const opensMacd=closedMacd.map(c=>c[0]);
         lookupFn=(_,signalTs)=>bsearchMacd(opensMacd,histMacd,signalTs,macdPeriodMs);
-        const macdTsLookupFn=(_,signalTs)=>bsearchMacdTs(opensMacd,signalTs,macdPeriodMs);
+        macdTsLookupFn=(_,signalTs)=>bsearchMacdTs(opensMacd,signalTs,macdPeriodMs);
         // ── MACD Trend fetch (chỉ khi Trading bật) ───────────────────────────
         if(slotTrendTf!=='none'){
           setMultiStatus('⏳ '+sym+': tải MACD Trend '+slotTrendTf.toUpperCase()+'...');
