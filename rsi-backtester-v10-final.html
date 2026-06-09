@@ -223,7 +223,7 @@ tr:nth-child(even) td{background:rgba(243,244,246,.8);}
   </div>
 
   <div id="optimizerSection" style="margin-top:8px;"></div>
-  <div id="smartLoadSection" style="margin-top:8px;"></div>
+  <div id="utilitySection" style="margin-top:8px;"></div>
   <div id="multiSlotSection" style="margin-top:8px;"></div>
 
   <div class="footer">⚠ Backtest chỉ mang tính tham khảo – không phải tư vấn đầu tư.</div>
@@ -240,9 +240,9 @@ let feeRate = 0.1; // % phí round-trip/lệnh (OKX futures taker: 0.05%×2 = 0.
 // ── MULTI SLOT STATE ──
 let multiSlotOpen = false;
 
-// ── SMART LOAD STATE ──
-let smartLoadOpen = false;
-let smartLoadStatus = '';
+// ── UTILITY SECTION STATE ──
+let utilOpen = false;
+let utilSmartResults = []; // [{coin, longFile, shortFile, status, merged}]
 let multiSlotLoading = false;
 let multiSlotStatus = '';
 let multiSlotResults = null;
@@ -1374,117 +1374,202 @@ async function runMultiSlot(){
   renderMultiSlot();
 }
 
+
 // ══════════════════════════════════════════════
-//  SMART LOAD — Gộp 2 JSON (Long + Short) thành 1 slot
+//  TIỆN ÍCH — độc lập, không đụng Optimizer hay Backtest Multi
 // ══════════════════════════════════════════════
-function loadSmartFiles(input){
+
+function utilProcessFiles(input){
   const files=Array.from(input.files);
   input.value='';
-  if(files.length!==2){
-    smartLoadStatus='⚠ Chọn đúng 2 file JSON (1 Long + 1 Short)';
-    renderSmartLoad();return;
-  }
-  let loaded=0;const parsed=[];
+  if(!files.length) return;
+  let loaded=0;
+  const parsed=[]; // [{filename, cfg, ok}]
+
   files.forEach(file=>{
     const reader=new FileReader();
     reader.onload=e=>{
       try{
         const cfg=JSON.parse(e.target.result);
-        parsed.push(cfg);
+        parsed.push({filename:file.name, cfg, ok:true});
       }catch(err){
-        smartLoadStatus='⚠ File JSON không hợp lệ: '+file.name;
-        renderSmartLoad();return;
+        parsed.push({filename:file.name, cfg:null, ok:false});
       }
       loaded++;
-      if(loaded===2) mergeSmartLoad(parsed);
+      if(loaded===files.length) utilBuildResults(parsed);
     };
     reader.readAsText(file);
   });
 }
 
-function mergeSmartLoad(cfgs){
-  const longCfg  = cfgs.find(c=>c.longEnabled===true  && c.shortEnabled===false);
-  const shortCfg = cfgs.find(c=>c.longEnabled===false && c.shortEnabled===true);
+function utilBuildResults(parsed){
+  // Group theo coin
+  const groups={}; // {coin: [{filename,cfg,ok}]}
+  parsed.forEach(item=>{
+    if(!item.ok){
+      const key='__err__'+item.filename;
+      groups[key]=[item];
+      return;
+    }
+    const coin=(item.cfg.coin||'UNKNOWN').toUpperCase().trim();
+    if(!groups[coin]) groups[coin]=[];
+    groups[coin].push(item);
+  });
 
-  if(!longCfg||!shortCfg){
-    smartLoadStatus='⚠ Cần đúng 1 file Long (longEnabled=true) và 1 file Short (shortEnabled=true)';
-    renderSmartLoad();return;
-  }
-  if((longCfg.coin||'').toUpperCase()!==(shortCfg.coin||'').toUpperCase()){
-    smartLoadStatus=`⚠ 2 file khác coin: ${longCfg.coin} ≠ ${shortCfg.coin}`;
-    renderSmartLoad();return;
-  }
-  if(longCfg.macdTf!==shortCfg.macdTf||longCfg.rsiTf!==shortCfg.rsiTf){
-    smartLoadStatus=`⚠ Cảnh báo: MACD TF hoặc RSI TF khác nhau — dùng cấu hình của file Long`;
-  } else {
-    smartLoadStatus='';
-  }
+  utilSmartResults=[];
+  Object.keys(groups).sort().forEach(coin=>{
+    const items=groups[coin];
 
-  // Tạo slot mới từ template
-  slotIdCnt++;
-  const s=mkSlot(slotIdCnt);
-  s.expanded=true;
-  s.coin=(longCfg.coin||'BTCUSDT').toUpperCase().trim();
-  s.sizeUsd=longCfg.sizeUsd??50;
-  s.leverage=longCfg.leverage??30;
-  s.maxOrders=longCfg.maxOrders??1;
-  s.macdTf=longCfg.macdTf||'1d';
-  s.rsiTf=longCfg.rsiTf||'1h';
-  s.macdAuto=longCfg.macdAuto!==false;
-  s.macdTrendTf=longCfg.macdTrendTf||'none';
-  s.long={...s.long,...(longCfg.long||{})};
-  s.short={...s.short,...(shortCfg.short||{})};
-  s.longEnabled=true;
-  s.shortEnabled=true;
+    // JSON lỗi
+    if(coin.startsWith('__err__')){
+      utilSmartResults.push({coin:'—',longFile:'—',shortFile:'—',
+        status:'❌ JSON lỗi: '+items[0].filename, merged:null});
+      return;
+    }
 
-  slots.push(s);
-  smartLoadStatus=(smartLoadStatus?smartLoadStatus+' · ':'')
-    +'✅ Đã gộp '+s.coin+' Long+Short thành 1 slot';
-  renderSmartLoad();
-  renderMultiSlot();
+    // Quá nhiều file
+    if(items.length>2){
+      utilSmartResults.push({coin,
+        longFile:items.filter(i=>i.cfg.longEnabled).map(i=>i.filename).join(', ')||'—',
+        shortFile:items.filter(i=>i.cfg.shortEnabled).map(i=>i.filename).join(', ')||'—',
+        status:'❌ Quá nhiều file ('+items.length+')', merged:null});
+      return;
+    }
+
+    const longItem  = items.find(i=>i.cfg.longEnabled===true  && i.cfg.shortEnabled===false);
+    const shortItem = items.find(i=>i.cfg.longEnabled===false && i.cfg.shortEnabled===true);
+
+    if(!longItem && !shortItem){
+      utilSmartResults.push({coin,
+        longFile:items[0]?.filename||'—', shortFile:items[1]?.filename||'—',
+        status:'❌ Không xác định được hướng', merged:null});
+      return;
+    }
+    if(!longItem){
+      utilSmartResults.push({coin, longFile:'—',
+        shortFile:shortItem.filename,
+        status:'❌ Thiếu file Long', merged:null});
+      return;
+    }
+    if(!shortItem){
+      utilSmartResults.push({coin,
+        longFile:longItem.filename, shortFile:'—',
+        status:'❌ Thiếu file Short', merged:null});
+      return;
+    }
+
+    // Cảnh báo TF khác nhau nhưng vẫn merge
+    const lc=longItem.cfg, sc=shortItem.cfg;
+    let warn='';
+    if(lc.macdTf!==sc.macdTf) warn+=' ⚠ MACD TF khác (dùng Long)';
+    if(lc.rsiTf!==sc.rsiTf)   warn+=' ⚠ RSI TF khác (dùng Long)';
+
+    const merged={
+      coin:coin,
+      sizeUsd:lc.sizeUsd??50,
+      leverage:lc.leverage??30,
+      maxOrders:lc.maxOrders??1,
+      macdTf:lc.macdTf||'1d',
+      rsiTf:lc.rsiTf||'1h',
+      macdAuto:lc.macdAuto!==false,
+      macdTrendTf:lc.macdTrendTf||'none',
+      long:{...(lc.long||{})},
+      short:{...(sc.short||{})},
+      longEnabled:true,
+      shortEnabled:true
+    };
+
+    utilSmartResults.push({coin,
+      longFile:longItem.filename, shortFile:shortItem.filename,
+      status:'✅ Sẵn sàng'+(warn?warn:''), merged});
+  });
+
+  renderUtility();
 }
 
-function renderSmartLoad(){
-  const el=document.getElementById('smartLoadSection');
-  if(!el) return;
-  el.innerHTML=`<div style="
-    background:linear-gradient(135deg,rgba(79,70,229,.03),rgba(22,163,74,.03));
-    border:1px solid var(--b2);border-radius:16px;
-    padding:${smartLoadOpen?'16px':'12px 16px'};margin-bottom:14px;">
+function utilDownload(idx){
+  const row=utilSmartResults[idx];
+  if(!row||!row.merged) return;
+  const def=row.coin.replace('USDT','')+'_merged';
+  const name=(prompt('Tên file:',def)||'').trim();
+  if(!name) return;
+  const blob=new Blob([JSON.stringify(row.merged,null,2)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=name+'.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
-    <div onclick="smartLoadOpen=!smartLoadOpen;renderSmartLoad()" style="
-      display:flex;align-items:center;justify-content:space-between;cursor:pointer;
-      ${smartLoadOpen?'margin-bottom:12px':''}">
+function renderUtility(){
+  const el=document.getElementById('utilitySection');
+  if(!el) return;
+  const hasResults=utilSmartResults.length>0;
+  const okCount=utilSmartResults.filter(r=>r.status.startsWith('✅')).length;
+  const errCount=utilSmartResults.length-okCount;
+
+  el.innerHTML=`<div style="
+    background:linear-gradient(135deg,rgba(8,145,178,.03),rgba(79,70,229,.03));
+    border:1px solid var(--b2);border-radius:16px;
+    padding:${utilOpen?'16px':'12px 16px'};margin-bottom:14px;">
+
+    <div onclick="utilOpen=!utilOpen;renderUtility()" style="
+      display:flex;align-items:center;justify-content:space-between;
+      cursor:pointer;${utilOpen?'margin-bottom:14px':''}">
       <div style="display:flex;align-items:center;gap:10px;">
-        <div style="width:3px;height:22px;background:linear-gradient(180deg,var(--acc),var(--grn));border-radius:4px;flex-shrink:0;"></div>
+        <div style="width:3px;height:22px;background:linear-gradient(180deg,var(--cyn),var(--acc));border-radius:4px;flex-shrink:0;"></div>
         <div>
-          <div style="font-size:13px;font-weight:900;color:var(--hi);letter-spacing:.5px;">🔗 LOAD SMART</div>
-          ${smartLoadOpen?'<div style="font-size:10px;color:var(--dim);margin-top:2px;letter-spacing:1px;">Gộp 2 file JSON (Long + Short) thành 1 slot</div>':''}
+          <div style="font-size:13px;font-weight:900;color:var(--hi);letter-spacing:.5px;">🛠 TIỆN ÍCH</div>
+          ${utilOpen?'<div style="font-size:10px;color:var(--dim);margin-top:2px;letter-spacing:1px;">Công cụ hỗ trợ · Load Smart · Gộp JSON</div>':''}
         </div>
       </div>
-      <div style="font-size:11px;font-weight:700;color:var(--acc);
-        background:rgba(79,70,229,.08);border:1px solid var(--acc);
+      <div style="font-size:11px;font-weight:700;color:var(--cyn);
+        background:rgba(8,145,178,.08);border:1px solid var(--cyn);
         border-radius:6px;padding:4px 12px;flex-shrink:0;">
-        ${smartLoadOpen?'▲ Ẩn':'▼ Hiện'}
+        ${utilOpen?'▲ Ẩn':'▼ Hiện'}
       </div>
     </div>
 
-    ${smartLoadOpen?`
-    <div style="font-size:11px;color:var(--dim);margin-bottom:10px;line-height:1.6;">
-      Chọn đúng <b>2 file JSON</b> được lưu từ Auto Optimizer:<br>
-      1 file <span style="color:var(--grn);font-weight:700">Long</span> (longEnabled=true) 
-      + 1 file <span style="color:var(--red);font-weight:700">Short</span> (shortEnabled=true)<br>
-      Cấu hình chung lấy từ file Long · Long/Short config lấy riêng từng file.
+  ${utilOpen?`
+    <!-- ── LOAD SMART ── -->
+    <div style="background:var(--bg1);border:1px solid var(--b1);border-radius:12px;padding:14px;margin-bottom:10px;">
+      <div style="font-size:11px;font-weight:900;color:var(--cyn);letter-spacing:1px;margin-bottom:6px;">🔗 LOAD SMART — Gộp JSON Long + Short</div>
+      <div style="font-size:11px;color:var(--dim);margin-bottom:10px;line-height:1.6;">
+        Chọn nhiều file JSON xuất từ Auto Optimizer.<br>
+        Tự động ghép đôi theo coin: 1 Long + 1 Short → 1 file mới.
+      </div>
+      <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;
+        background:var(--bg0);border:1.5px solid var(--cyn);border-radius:9px;
+        padding:9px 16px;font-size:12px;font-weight:700;color:var(--cyn);">
+        📂 Chọn file JSON (chọn nhiều)
+        <input type="file" accept=".json" multiple onchange="utilProcessFiles(this)" style="display:none">
+      </label>
+
+      ${hasResults?`
+      <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+        <div style="background:rgba(22,163,74,.1);border:1px solid var(--grn);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:800;color:var(--grn);">✅ Ghép được: ${okCount}</div>
+        ${errCount>0?`<div style="background:rgba(220,38,38,.1);border:1px solid var(--red);border-radius:8px;padding:5px 12px;font-size:11px;font-weight:800;color:var(--red);">❌ Lỗi: ${errCount}</div>`:''}
+        <div style="background:var(--bg2);border:1px solid var(--b1);border-radius:8px;padding:5px 12px;font-size:11px;color:var(--dim);">Tổng: ${utilSmartResults.length} coin</div>
+      </div>
+      <div class="tbl-wrap" style="margin-bottom:0">
+        <div class="tbl-scroll"><table>
+          <thead><tr>
+            <th>Coin</th><th>File Long</th><th>File Short</th><th>Trạng thái</th><th></th>
+          </tr></thead>
+          <tbody>
+          ${utilSmartResults.map((r,i)=>`<tr>
+            <td style="font-weight:700;color:var(--hi)">${esc(r.coin)}</td>
+            <td style="color:var(--grn);font-size:9px">${esc(r.longFile)}</td>
+            <td style="color:var(--red);font-size:9px">${esc(r.shortFile)}</td>
+            <td style="font-size:10px;color:${r.status.startsWith('✅')?'var(--grn)':r.status.includes('⚠')?'var(--ora)':'var(--red)'}">${esc(r.status)}</td>
+            <td>${r.merged?`<span onclick="utilDownload(${i})" style="cursor:pointer;font-size:11px;color:var(--grn);background:rgba(22,163,74,.08);border:1px solid var(--grn);border-radius:6px;padding:2px 8px;" title="Tải file JSON gộp">💾</span>`:'—'}</td>
+          </tr>`).join('')}
+          </tbody>
+        </table></div>
+      </div>
+      `:''}
     </div>
-    <label style="
-      display:inline-flex;align-items:center;gap:8px;cursor:pointer;
-      background:var(--bg2);border:1.5px solid var(--acc);border-radius:10px;
-      padding:10px 18px;font-size:12px;font-weight:700;color:var(--acc);">
-      🔗 CHỌN 2 FILE JSON
-      <input type="file" accept=".json" multiple onchange="loadSmartFiles(this)" style="display:none">
-    </label>
-    ${smartLoadStatus?`<div style="margin-top:10px;font-size:11px;color:${smartLoadStatus.includes('✅')?'var(--grn)':smartLoadStatus.includes('⚠')?'var(--ora)':'var(--dim)'};">${smartLoadStatus}</div>`:''}
-    `:''}
+  `:''}
   </div>`;
 }
 
@@ -1898,7 +1983,7 @@ function renderMultiSlot(){
 
 // init
 renderOptimizer();
-renderSmartLoad();
+renderUtility();
 renderMultiSlot();
 </script>
 </body>
