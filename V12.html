@@ -277,8 +277,10 @@ function optCfgObj(r){
     maxOrders:optState.maxOrders,
     ...Object.fromEntries(INDICATOR_BOXES.map(b=>[b.key,tf(r[b.key+'Tf'])])),
     // ★ BOX ĐỘC LẬP (Độ dốc filter) — chỉ xuất khi đang BẬT (giống khuôn DCA), tắt thì không có 2 field này trong
-    // JSON, giữ tương thích ngược file cũ. Xóa: xóa dòng "...(optState.slopeOn?...)" này để gỡ, không ảnh hưởng gì khác.
-    ...(optState.slopeOn?{slopeOn:true,slopeK:optState.slopeK}:{}),
+    // JSON, giữ tương thích ngược file cũ. Dùng r.slopeK (k thắng của ĐÚNG tổ hợp này, lưu lúc runOptimizer() push
+    // kết quả) — KHÔNG dùng optState.slopeK vì đó chỉ là biến tạm trong vòng lặp dò k, không phản ánh đúng tổ hợp
+    // đang export. Xóa: xóa dòng "...(optState.slopeOn?...)" này để gỡ, không ảnh hưởng gì khác.
+    ...(optState.slopeOn?{slopeOn:true,slopeK:r.slopeK||1}:{}),
   };
 }
 function optCfgDefName(r){
@@ -717,7 +719,8 @@ let optState = {
   // chỉ xét dấu +/- như trước. Mặc định TẮT = hành vi y hệt cũ, không đổi gì. Xóa: xóa 2 field "slopeOn"/"slopeK"
   // này + ô UI checkbox+input trong renderOptimizer() + hàm bsearchMacdIdx() + phần "&&(!optState.slopeOn||...)"
   // trong 6 filter của INDICATOR_BOXES (đổi về đúng 1 dòng "return v!==null&&(dir==='buy'?v>0:v<0);") để gỡ sạch.
-  slopeOn:false, slopeK:1,
+  // slopeK ĐANG là biến TẠM (được gán lần lượt trong vòng lặp combo bên dưới) — danh sách k cần dò nằm ở slopeKs.
+  slopeOn:false, slopeK:1, slopeKs:[1],
   filterPeriod:null, filterDir:null, running:false,
   dedupKeys:[],
   progress:0, total:0, results:[], statusMsg:'', activeBoxKeys:[],
@@ -778,7 +781,7 @@ async function runOptimizer(){
   })();
 
   const combos=activeEntries.length*OPT_RSI_PERIODS.length*OPT_DIRS.length*OPT_RSI.length
-    *OPT_TP.length*OPT_SL.length*allIndCombos.length;
+    *OPT_TP.length*OPT_SL.length*allIndCombos.length*(optState.slopeOn?optState.slopeKs.length:1); // ★ BOX ĐỘC LẬP (Độ dốc filter) — xóa "*(optState.slopeOn?...)" để gỡ, quay về đếm tổ hợp không tính k.
   optState.total=combos;
 
   const entryCandles={};
@@ -825,32 +828,41 @@ async function runOptimizer(){
           for(const tp of OPT_TP){
             for(const sl of OPT_SL){
               const base=eb.generate(entryCandles[eb.key],entryHists[eb.key][period],dir,startTs,endTs,level,tp,sl,0);
-              for(const combo of allIndCombos){
-                let ft=base;
-                for(let i=0;i<INDICATOR_BOXES.length;i++){
-                  const tf=combo[i];
-                  if(tf&&tf!=='none') ft=INDICATOR_BOXES[i].filter(ft,boxData[INDICATOR_BOXES[i].key][tf],dir);
+              // ★ BOX ĐỘC LẬP (Độ dốc filter) — dò qua từng k trong optState.slopeKs (chỉ khi slopeOn bật), coi k
+              // như 1 tham số tổ hợp giống TP/SL/level. Tắt slopeOn → chạy đúng 1 vòng (k=1, không ảnh hưởng vì
+              // optSlopePass() trả true ngay khi slopeOn=false, k lúc này vô nghĩa). Xóa: xóa nguyên vòng
+              // "for(const k of ...)" này (bỏ thụt lề khối bên trong ra ngoài 1 cấp) + "optState.slopeK=k;" +
+              // "...(optState.slopeOn?{slopeK:k}:{})" trong res.push để gỡ, quay về chạy đúng 1 tổ hợp không có k.
+              for(const k of (optState.slopeOn?optState.slopeKs:[1])){
+                optState.slopeK=k;
+                for(const combo of allIndCombos){
+                  let ft=base;
+                  for(let i=0;i<INDICATOR_BOXES.length;i++){
+                    const tf=combo[i];
+                    if(tf&&tf!=='none') ft=INDICATOR_BOXES[i].filter(ft,boxData[INDICATOR_BOXES[i].key][tf],dir);
+                  }
+                  ft=applyMaxOrdersPost(ft,optState.maxOrders);
+                  const sum=summarize(ft);
+                  const wr=sum.closed>0?sum.wins/sum.closed*100:0;
+                  const mcl=optState.consecLossOn?maxConsecLosses(ft):0;
+                  if(sum.closed>=optState.minTrades&&wr>=optState.minWR&&sum.totalPnl>=optState.minPnl
+                    &&(!optState.consecLossOn||mcl<=optState.consecLoss)
+                    &&tp>=optState.minTp&&sl>=optState.minSl /* BOX ĐỘC LẬP — LỌC TP%/SL% · xóa đúng "&&tp>=optState.minTp&&sl>=optState.minSl" này để gỡ */
+                    &&(sum.totalPnl-sum.closed*feeRate)>=optState.minNetPnl){ /* BOX ĐỘC LẬP — LỌC NET PNL% · xóa đúng "&&(sum.totalPnl-sum.closed*feeRate)>=optState.minNetPnl" này để gỡ */
+                    const tfRes={};
+                    INDICATOR_BOXES.forEach((b,i)=>tfRes[b.key+'Tf']=combo[i]||'none');
+                    res.push({
+                      period,dir,level,tp,sl,
+                      entrySignal:eb.signal,entryTf:optState[eb.key].tf,
+                      ...tfRes,
+                      ...(optState.slopeOn?{slopeK:k}:{}), // ★ BOX ĐỘC LẬP (Độ dốc filter) — lưu đúng k thắng của tổ hợp này
+                      trades:sum.closed,wins:sum.wins,losses:sum.losses,
+                      wr:parseFloat(wr.toFixed(1)),pnl:parseFloat(sum.totalPnl.toFixed(2))
+                    });
+                  }
+                  done++;
+                  if(done%200===0){optState.progress=done;renderOptimizerProgress();}
                 }
-                ft=applyMaxOrdersPost(ft,optState.maxOrders);
-                const sum=summarize(ft);
-                const wr=sum.closed>0?sum.wins/sum.closed*100:0;
-                const mcl=optState.consecLossOn?maxConsecLosses(ft):0;
-                if(sum.closed>=optState.minTrades&&wr>=optState.minWR&&sum.totalPnl>=optState.minPnl
-                  &&(!optState.consecLossOn||mcl<=optState.consecLoss)
-                  &&tp>=optState.minTp&&sl>=optState.minSl /* BOX ĐỘC LẬP — LỌC TP%/SL% · xóa đúng "&&tp>=optState.minTp&&sl>=optState.minSl" này để gỡ */
-                  &&(sum.totalPnl-sum.closed*feeRate)>=optState.minNetPnl){ /* BOX ĐỘC LẬP — LỌC NET PNL% · xóa đúng "&&(sum.totalPnl-sum.closed*feeRate)>=optState.minNetPnl" này để gỡ */
-                  const tfRes={};
-                  INDICATOR_BOXES.forEach((b,i)=>tfRes[b.key+'Tf']=combo[i]||'none');
-                  res.push({
-                    period,dir,level,tp,sl,
-                    entrySignal:eb.signal,entryTf:optState[eb.key].tf,
-                    ...tfRes,
-                    trades:sum.closed,wins:sum.wins,losses:sum.losses,
-                    wr:parseFloat(wr.toFixed(1)),pnl:parseFloat(sum.totalPnl.toFixed(2))
-                  });
-                }
-                done++;
-                if(done%200===0){optState.progress=done;renderOptimizerProgress();}
               }
             }
           }
@@ -1020,8 +1032,15 @@ function renderOptimizer(){
     <div style="display:flex;align-items:center;gap:8px;background:rgba(79,70,229,.05);border:1px solid var(--acc);border-radius:8px;padding:6px 10px;margin-bottom:8px;">
       <button onclick="optState.slopeOn=!optState.slopeOn;renderOptimizer()" style="padding:4px 10px;border-radius:6px;cursor:pointer;font:700 10px/1 'Outfit',sans-serif;background:${o.slopeOn?'rgba(79,70,229,.1)':'var(--bg0)'};border:1px solid ${o.slopeOn?'var(--acc)':'var(--b2)'};color:${o.slopeOn?'var(--acc)':'var(--dim)'};">${o.slopeOn?'✓ Bật':'⬜ Tắt'}</button>
       <span style="font-size:10px;font-weight:700;color:${o.slopeOn?'var(--acc)':'var(--dim)'};">Tính độ dốc filter (áp cho cả MACD/CMF/OBV)</span>
-      ${o.slopeOn?`<span style="font-size:9px;color:var(--dim);margin-left:auto;">so với</span><input type="number" min="1" max="10" value="${o.slopeK}" oninput="optState.slopeK=parseInt(this.value)||1" style="width:40px;text-align:center;background:var(--bg0);border:1.5px solid var(--acc);border-radius:6px;color:var(--acc);padding:3px;font-size:11px;font-weight:800;outline:none;font-family:'JetBrains Mono',monospace;"><span style="font-size:9px;color:var(--dim);">nến trước</span>`:''}
     </div>
+    <!-- ★ BOX ĐỘC LẬP (Độ dốc filter) — chọn NHIỀU k cùng lúc (giống cách chọn nhiều TF ở các box chỉ báo), Optimizer
+    tự chạy tổ hợp qua từng k để tìm ra k tốt nhất cùng lúc với TP/SL/level/filter. Xóa: xóa div này để gỡ riêng phần
+    chọn k (giữ nguyên phần bật/tắt slopeOn ở div trên), đồng thời xóa field "slopeKs" ở optState + vòng lặp
+    "for(const k of ...)" trong runOptimizer() + "r.slopeK" trong optCfgObj() theo chỉ dẫn ở đó. -->
+    ${o.slopeOn?`<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:rgba(79,70,229,.05);border:1px solid var(--acc);border-top:none;border-radius:0 0 8px 8px;padding:6px 10px;margin-top:-8px;margin-bottom:8px;">
+      <span style="font-size:9px;color:var(--dim);">so với nến trước k bước (tick nhiều để dò tổ hợp):</span>
+      ${[1,2,3,4,5,6,7,8,9,10].map(k=>`<button onclick="const i=optState.slopeKs.indexOf(${k});if(i>=0){if(optState.slopeKs.length>1)optState.slopeKs.splice(i,1);}else optState.slopeKs.push(${k});optState.slopeKs.sort((a,b)=>a-b);renderOptimizer()" style="padding:3px 8px;border-radius:5px;cursor:pointer;font:700 10px/1 'JetBrains Mono',monospace;background:${o.slopeKs.includes(k)?'var(--acc)':'var(--bg0)'};border:1px solid ${o.slopeKs.includes(k)?'var(--acc)':'var(--b2)'};color:${o.slopeKs.includes(k)?'#fff':'var(--dim)'};">${k}</button>`).join('')}
+    </div>`:''}
     <div style="font-size:10px;color:var(--acc);font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">🔵 BỘ LỌC TRADE (AND · thuận chiều)</div>
     ${INDICATOR_BOXES.filter(b=>b.group==='trade').map(b=>indBoxHtml(b)).join('')}
 
@@ -3141,12 +3160,14 @@ let wfoState = {
   // thành "0" (2 dòng "optState.minPnl=0;...minNetPnl=...") để gỡ, quay về không cho chỉnh Net PnL%≥.
   minNetPnl:0,
   // ★ Tính độ dốc filter (MACD/CMF/OBV) — KHÔNG build lại thuật toán, chỉ gọi luôn cờ đã có sẵn ở Optimizer
-  // (optState.slopeOn/slopeK) và Backtest Detail (btState.slopeOn/slopeK) trong đúng lúc WFO chạy IS lẫn OOS —
-  // luôn đồng thuận nhất quán cả 2 bước, không tách riêng. Mặc định TẮT = hành vi y hệt cũ. Xóa: xóa 2 field
-  // "slopeOn"/"slopeK" này + ô UI checkbox+input trong wfo_boxHtml() + 6 dòng "optState.slopeOn=wfoState.slopeOn;
-  // optState.slopeK=..."/"btState.slopeOn=...;btState.slopeK=..." (3 chỗ trong wfo_run()) để gỡ sạch, không ảnh
-  // hưởng gì tới Optimizer/Backtest Detail (2 cờ đó vẫn hoạt động độc lập bình thường ngoài lúc chạy WFO).
-  slopeOn:false, slopeK:1,
+  // (optState.slopeOn/slopeKs) trong bước Optimize IS (WFO tự dò tổ hợp qua từng k, giống TP/SL/level), rồi truyền
+  // đúng k thắng của mỗi đoạn xuống Backtest Detail (btState.slopeOn/slopeK, chỉ 1 số) ở bước Test OOS — luôn đồng
+  // thuận nhất quán IS→OOS, không tách riêng. Mặc định TẮT = hành vi y hệt cũ. Xóa: xóa 2 field "slopeOn"/"slopeKs"
+  // này + ô UI checkbox+dãy nút chọn k trong wfo_boxHtml() + 2 dòng "optState.slopeOn=wfoState.slopeOn;
+  // optState.slopeKs=..." (2 chỗ trong wfo_run()) + phần "...(w.slopeK!=null?{...}:{})" khi build cfg OOS để gỡ
+  // sạch, không ảnh hưởng gì tới Optimizer/Backtest Detail (2 cờ đó vẫn hoạt động độc lập bình thường ngoài lúc
+  // chạy WFO).
+  slopeOn:false, slopeKs:[1],
   // ★ Vốn dự kiến/Đòn bẩy/Size USD/lệnh — riêng của WFO Runner, KHÔNG dùng ké btState còn sót từ box khác nữa
   // (trước đây ovSizeUsd/ovLeverage để rỗng nên netUsdt bị tính theo đòn bẩy ẩn ngẫu nhiên — đã sửa ở wfo_run()).
   // Dùng "capital" để quy đổi Max Drawdown USDT ở mục 4 ra %. Xóa: xóa 3 field này + input tương ứng trong 1a +
@@ -3160,7 +3181,8 @@ let wfoState = {
   maxOrders:1,
   // ★ Cách chọn winner sau khi chạy IS — modul con độc lập, KHÔNG đụng runOptimizer()/thuật toán nào khác, chỉ hậu
   // xử lý lại đúng optState.results đã trả về. 'plateau' (mặc định, khuyến nghị) = chọn tổ hợp có vùng lân cận
-  // TP/SL cũng tốt (chống đỉnh nhọn ăn may) trong nhóm top 30% theo netpnl. 'top1' = quay lại cách cũ, lấy đúng
+  // TP/SL cũng tốt (chống đỉnh nhọn ăn may), quét trên TOÀN BỘ optState.results (không cắt top % nào trước —
+  // xem chi tiết ở comment wfo_pickWinner()). 'top1' = quay lại cách cũ, lấy đúng
   // dòng #1 netpnl. Xóa: xóa field "selectMethod" này + hàm wfo_netPnl/wfo_plateauScore/wfo_pickWinner + 2 nút
   // chọn trong 1a + cột "#hạng gốc" trong bảng mục 3 + dòng thống kê trùng top-1, đổi lại "const w=wfo_pickWinner(
   // optState.results).winner;" trong wfo_run() thành "const w=optState.results[0];" để gỡ sạch, quay về top-1.
@@ -3231,19 +3253,22 @@ function wfo_plateauScore(results,candidate){
   }
   return count?sum/count:wfo_netPnl(candidate);
 }
-// wfo_pickWinner: 'plateau' = lọc top 30% theo netPnl trước (tránh chọn nhầm vùng phẳng toàn lỗ), rồi trong nhóm
-// đó chọn điểm cao nguyên cao nhất. 'top1' = quay lại đúng hành vi cũ (dòng #1 netPnl). Trả kèm rawRank/rawTotal
-// để UI hiện rõ winner đứng thứ mấy trong bảng xếp hạng netPnl gốc — không phải hộp đen.
+// wfo_pickWinner: 'plateau' = quét TOÀN BỘ results (đã qua ★ minTrades/minWR/minNetPnl từ trước ở runOptimizer()),
+// tính điểm cao nguyên (trung bình netPnl của chính nó + các lân cận TP/SL) cho TỪNG ứng viên, rồi chọn điểm cao
+// nguyên CAO NHẤT — KHÔNG giới hạn trước theo top X% nào nữa (bản cũ lọc top 30% theo netPnl thô trước khi tính
+// điểm cao nguyên, có thể loại nhầm đúng vùng cao nguyên thật sự ổn định nhưng netPnl cá nhân không đủ nổi bật để
+// lọt top 30% — sai đúng tinh thần phương pháp gốc, đã sửa theo yêu cầu). 'top1' = quay lại đúng hành vi cũ (dòng
+// #1 netPnl). Trả kèm rawRank/rawTotal để UI hiện rõ winner đứng thứ mấy trong bảng xếp hạng netPnl gốc — không
+// phải hộp đen. Xóa: đổi lại "const pool=sorted.slice(0,Math.max(1,Math.ceil(sorted.length*0.3)));" rồi lặp qua
+// "pool" thay vì "sorted" để quay về hành vi lọc top 30% cũ.
 function wfo_pickWinner(results){
   if(!results.length)return null;
   const sorted=[...results].sort((a,b)=>wfo_netPnl(b)-wfo_netPnl(a));
   if(wfoState.selectMethod!=='plateau'){
     return {winner:sorted[0], rawRank:1, rawTotal:sorted.length, plateauScore:wfo_netPnl(sorted[0]), rawScore:wfo_netPnl(sorted[0])};
   }
-  const topK=Math.max(1,Math.ceil(sorted.length*0.3));
-  const pool=sorted.slice(0,topK);
   let best=null,bestScore=-Infinity;
-  for(const cand of pool){
+  for(const cand of sorted){
     const score=wfo_plateauScore(sorted,cand);
     if(score>bestScore){bestScore=score;best=cand;}
   }
@@ -3325,7 +3350,7 @@ async function wfo_run(){
       // tính fee mới) để bước CHỌN winner mỗi đoạn khớp với bước ĐÁNH GIÁ 4 công thức ổn định (đều dùng net pnl sau
       // phí). Xóa: đổi lại thành 'pnl' để quay về sort theo pnl thô như trước, không ảnh hưởng gì khác.
       optState.consecLossOn=false; optState.maxOrders=wfoState.maxOrders; optState.sortBy='netpnl';
-      optState.slopeOn=wfoState.slopeOn; optState.slopeK=wfoState.slopeK;
+      optState.slopeOn=wfoState.slopeOn; optState.slopeKs=[...wfoState.slopeKs];
       ENTRY_BOXES.forEach(eb=>{ optState[eb.key].on=wfoState[eb.key].on; optState[eb.key].tf=wfoState[eb.key].tf; });
       INDICATOR_BOXES.forEach(b=>{ optState[b.key].on=wfoState[b.key].on; optState[b.key].tfs=[...wfoState[b.key].tfs]; });
       await runOptimizer();
@@ -3336,7 +3361,12 @@ async function wfo_run(){
       }
       const pick=wfo_pickWinner(optState.results);
       const w=pick.winner;
-      const cfg={coin:wfoState.coin,tp:w.tp,sl:w.sl,dir:w.dir,entrySignal:w.entrySignal,entryTf:w.entryTf,level:w.level,period:w.period,maxOrders:wfoState.maxOrders};
+      const cfg={coin:wfoState.coin,tp:w.tp,sl:w.sl,dir:w.dir,entrySignal:w.entrySignal,entryTf:w.entryTf,level:w.level,period:w.period,maxOrders:wfoState.maxOrders,
+        // ★ BOX ĐỘC LẬP (Độ dốc filter) — truyền ĐÚNG k thắng của tổ hợp IS này (w.slopeK, do runOptimizer() lưu
+        // lại khi dò slopeKs) xuống cfg để btStateFromConfig() (gọi bên trong runBacktest()) nạp đúng k, KHÔNG
+        // dùng wfoState.slopeK cố định nữa. Xóa: xóa dòng "...(wfoState.slopeOn...)" này để gỡ, cfg trở lại không
+        // có field slopeOn/slopeK (OOS sẽ không áp độ dốc, giống hành vi trước khi có box này).
+        ...(wfoState.slopeOn&&w.slopeK!=null?{slopeOn:true,slopeK:w.slopeK}:{})};
       INDICATOR_BOXES.forEach(b=>{ const v=w[b.key+'Tf']; if(v&&v!=='none')cfg[b.key]=v; });
       wfoState.statusMsg=`Test OOS mù (${wfo_dmy(seg.oosStart)} → ${wfo_dmy(seg.oosEnd)})`;
       wfo_updateProgressDom(i,segs.length,wfoState.statusMsg);
@@ -3344,7 +3374,10 @@ async function wfo_run(){
       btState.ovSizeUsd=wfoState.sizeUsd||''; btState.ovLeverage=wfoState.leverage||'';
       btState.ovStart=wfo_dmy(seg.oosStart); btState.ovEnd=wfo_dmy(seg.oosEnd);
       btState.mergePositionOn=false;
-      btState.slopeOn=wfoState.slopeOn; btState.slopeK=wfoState.slopeK;
+      // ★ Lưu ý: btState.slopeOn/slopeK thật sự được set bên trong runBacktest()→btStateFromConfig(cfg) đọc từ
+      // cfg.slopeOn/slopeK ở trên (đúng field vừa thêm) — KHÔNG cần gán tay ở đây nữa (gán tay trước đó từng bị
+      // btStateFromConfig() ghi đè lại vì cfg cũ thiếu field, khiến OOS luôn chạy TẮT độ dốc dù wfoState bật — đã
+      // sửa bằng cách thêm field vào cfg thay vì gán trực tiếp btState).
       const _origRB=renderBacktest; renderBacktest=function(){};
       try{ await runBacktest(); } finally{ renderBacktest=_origRB; }
       const oosTrades=btState.results.filter(t=>t.result!=='OPEN');
@@ -3374,7 +3407,7 @@ async function wfo_run(){
       optState.minTrades=wfoState.minTrades; optState.minWR=wfoState.minWR;
       optState.minPnl=0; optState.minTp=0; optState.minSl=0; optState.minNetPnl=wfoState.minNetPnl||0;
       optState.consecLossOn=false; optState.maxOrders=wfoState.maxOrders; optState.sortBy='netpnl';
-      optState.slopeOn=wfoState.slopeOn; optState.slopeK=wfoState.slopeK;
+      optState.slopeOn=wfoState.slopeOn; optState.slopeKs=[...wfoState.slopeKs];
       ENTRY_BOXES.forEach(eb=>{ optState[eb.key].on=wfoState[eb.key].on; optState[eb.key].tf=wfoState[eb.key].tf; });
       INDICATOR_BOXES.forEach(b=>{ optState[b.key].on=wfoState[b.key].on; optState[b.key].tfs=[...wfoState[b.key].tfs]; });
       await runOptimizer();
@@ -3470,7 +3503,9 @@ function wfo_exportLastConfig(){
   const fc=wfoState.finalConfig;
   if(!fc){alert('Chưa có config deploy (IS sát hiện tại không đủ tổ hợp thỏa ★)');return;}
   const w=fc.winner;
-  const cfg={coin:wfoState.coin,tp:w.tp,sl:w.sl,dir:w.dir,entrySignal:w.entrySignal,entryTf:w.entryTf,level:w.level,period:w.period,maxOrders:wfoState.maxOrders};
+  const cfg={coin:wfoState.coin,tp:w.tp,sl:w.sl,dir:w.dir,entrySignal:w.entrySignal,entryTf:w.entryTf,level:w.level,period:w.period,maxOrders:wfoState.maxOrders,
+    // ★ BOX ĐỘC LẬP (Độ dốc filter) — xuất đúng k thắng của config deploy (w.slopeK). Xóa: xóa dòng này để gỡ.
+    ...(wfoState.slopeOn&&w.slopeK!=null?{slopeOn:true,slopeK:w.slopeK}:{})};
   INDICATOR_BOXES.forEach(b=>{ const v=w[b.key+'Tf']; if(v&&v!=='none')cfg[b.key]=v; });
   const blob=new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);
@@ -3584,14 +3619,19 @@ function wfo_boxHtml(){
         ${s.collapsed.entry?`<div style="font-size:11px;color:var(--dim);">${esc(wfo_summaryEntry())}</div>`:`<div style="display:flex;gap:8px;flex-wrap:wrap;">${ENTRY_BOXES.map(eb=>wfo_entryBoxHtml(eb)).join('')}</div>`}
       </div>
 
-      <!-- ★ BOX ĐỘC LẬP (Độ dốc filter) — KHÔNG build lại thuật toán, chỉ gọi luôn cờ optState.slopeOn/slopeK
-      (Optimizer) + btState.slopeOn/slopeK (Backtest Detail) đã có sẵn, đồng thuận cả IS lẫn OOS trong wfo_run().
-      Xóa: xóa div này để gỡ riêng UI, xóa 2 field wfoState.slopeOn/slopeK + 3 cặp dòng gán trong wfo_run() để gỡ sạch. -->
-      <div style="display:flex;align-items:center;gap:8px;background:rgba(79,70,229,.05);border:1px solid var(--acc);border-radius:8px;padding:6px 10px;margin-bottom:10px;">
+      <!-- ★ BOX ĐỘC LẬP (Độ dốc filter) — KHÔNG build lại thuật toán, chỉ gọi luôn cờ optState.slopeOn/slopeKs
+      (Optimizer tự dò tổ hợp qua từng k trong lúc Optimize IS) rồi truyền đúng k thắng xuống btState.slopeOn/slopeK
+      (Backtest Detail, chỉ 1 số) ở bước Test OOS — đồng thuận IS→OOS. Xóa: xóa div này để gỡ riêng UI, xóa field
+      wfoState.slopeOn/slopeKs + 2 cặp dòng gán optState.slopeOn/slopeKs trong wfo_run() + phần build cfg.slopeOn/
+      slopeK từ w.slopeK (2 chỗ: OOS + wfo_exportLastConfig()) để gỡ sạch. -->
+      <div style="display:flex;align-items:center;gap:8px;background:rgba(79,70,229,.05);border:1px solid var(--acc);border-radius:8px;padding:6px 10px;margin-bottom:${s.slopeOn?'0':'10px'};">
         <button onclick="wfoState.slopeOn=!wfoState.slopeOn;renderUtility()" style="padding:4px 10px;border-radius:6px;cursor:pointer;font:700 10px/1 'Outfit',sans-serif;background:${s.slopeOn?'rgba(79,70,229,.1)':'var(--bg0)'};border:1px solid ${s.slopeOn?'var(--acc)':'var(--b2)'};color:${s.slopeOn?'var(--acc)':'var(--dim)'};">${s.slopeOn?'✓ Bật':'⬜ Tắt'}</button>
         <span style="font-size:10px;font-weight:700;color:${s.slopeOn?'var(--acc)':'var(--dim)'};">Tính độ dốc filter (áp cho cả MACD/CMF/OBV, đồng thuận IS+OOS)</span>
-        ${s.slopeOn?`<span style="font-size:9px;color:var(--dim);margin-left:auto;">so với</span><input type="number" min="1" max="10" value="${s.slopeK}" onchange="wfoState.slopeK=parseInt(this.value)||1" style="width:40px;text-align:center;background:var(--bg0);border:1.5px solid var(--acc);border-radius:6px;color:var(--acc);padding:3px;font-size:11px;font-weight:800;outline:none;font-family:'JetBrains Mono',monospace;"><span style="font-size:9px;color:var(--dim);">nến trước</span>`:''}
       </div>
+      ${s.slopeOn?`<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:rgba(79,70,229,.05);border:1px solid var(--acc);border-top:none;border-radius:0 0 8px 8px;padding:6px 10px;margin-top:-4px;margin-bottom:10px;">
+        <span style="font-size:9px;color:var(--dim);">so với nến trước k bước (tick nhiều để Optimizer tự dò tổ hợp mỗi đoạn IS):</span>
+        ${[1,2,3,4,5,6,7,8,9,10].map(k=>`<button onclick="const i=wfoState.slopeKs.indexOf(${k});if(i>=0){if(wfoState.slopeKs.length>1)wfoState.slopeKs.splice(i,1);}else wfoState.slopeKs.push(${k});wfoState.slopeKs.sort((a,b)=>a-b);renderUtility()" style="padding:3px 8px;border-radius:5px;cursor:pointer;font:700 10px/1 'JetBrains Mono',monospace;background:${s.slopeKs.includes(k)?'var(--acc)':'var(--bg0)'};border:1px solid ${s.slopeKs.includes(k)?'var(--acc)':'var(--b2)'};color:${s.slopeKs.includes(k)?'#fff':'var(--dim)'};">${k}</button>`).join('')}
+      </div>`:''}
 
       <!-- 1c. Filter trade — modul con, xóa div này để gỡ riêng, WFO vẫn chạy được (Optimizer coi như không bật filter trade) -->
       <div style="background:var(--bg0);border:1px solid var(--b2);border-radius:10px;padding:10px 12px;margin-bottom:10px;">
@@ -3635,20 +3675,36 @@ function wfo_boxHtml(){
             {k:'b',label:'Bỏ đoạn tốt nhất',val:(st.totalWithoutBest>=0?'+':'')+st.totalWithoutBest.toFixed(1)+'%',pass:st.passB},
             {k:'c',label:'WFE',val:st.wfe.toFixed(2),pass:st.passC},
             {k:'d',label:'Tham số ổn định',val:'CV '+Math.max(st.paramCV.tp,st.paramCV.sl).toFixed(2),pass:st.passD},
-            // ★ Thẻ tham khảo (không tính vào "đạt mấy/4") — tổng Net PnL% cộng dồn tất cả đoạn OOS, dễ bị 1 đoạn
-            // ăn may kéo lên nên chỉ mang tính tổng quan, thẻ "Bỏ đoạn tốt nhất" mới là thẻ kiểm định thật.
-            {k:'e',label:'Tổng Net PnL% OOS',val:(st.totalOosPct>=0?'+':'')+st.totalOosPct.toFixed(1)+'%',pass:null},
           ].map(m=>{
-            const c=m.pass===null?'var(--acc)':(m.pass?'var(--grn)':'var(--red)');
-            const bg=m.pass===null?'rgba(79,70,229,.06)':(m.pass?'rgba(22,163,74,.08)':'rgba(220,38,38,.08)');
+            const c=m.pass?'var(--grn)':'var(--red)';
+            const bg=m.pass?'rgba(22,163,74,.08)':'rgba(220,38,38,.08)';
             return `<div style="background:${bg};border:1px solid ${c};border-radius:10px;padding:8px 10px;">
             <div style="display:flex;align-items:center;justify-content:space-between;">
-              <span style="font-size:10px;font-weight:700;color:${c};">${m.label}${m.pass===null?' (tham khảo)':''}</span>
+              <span style="font-size:10px;font-weight:700;color:${c};">${m.label}</span>
               <span onclick="wfoState.showFormulaKey='${m.k}';renderUtility()" title="Xem giải thích chi tiết" style="cursor:pointer;font-size:11px;font-weight:900;color:${c};border:1px solid ${c};border-radius:50%;width:15px;height:15px;display:flex;align-items:center;justify-content:center;">i</span>
             </div>
             <div style="font-size:15px;font-weight:800;color:${c};margin-top:2px;">${m.val}</div>
           </div>`;}).join('')}
         </div>
+        <!-- ★ BOX ĐỘC LẬP (3 ô trắng/đen: Tổng Net PnL% OOS + Tổng lệnh IS + Tổng lệnh OOS) — cả 3 nằm CHUNG 1 hàng
+        theo yêu cầu (tách "Tổng Net PnL% OOS" ra khỏi lưới 4 thẻ a-d phía trên, không tính vào "đạt mấy/4", không
+        đụng công thức/field wfoState.stability nào). Xóa: xóa nguyên khối IIFE này để gỡ cả 3 ô, không ảnh hưởng
+        gì tới 4 thẻ a-d phía trên hay Monte Carlo phía dưới. -->
+        ${(()=>{
+          const totalIsTrades=done.reduce((a,x)=>a+(x.winner?x.winner.trades:0),0);
+          const totalOosTrades=done.reduce((a,x)=>a+(x.trades||0),0);
+          const wbCard=(label,val)=>`<div style="background:#fff;border:1px solid #000;border-radius:10px;padding:8px 10px;">
+              <span style="font-size:10px;font-weight:700;color:#000;">${label}</span>
+              <div style="font-size:15px;font-weight:800;color:#000;margin-top:2px;">${val}</div>
+            </div>`;
+          // ★ Ép CỨNG đúng 3 cột luôn nằm 1 hàng (repeat(3,1fr) thay vì auto-fit/minmax — auto-fit sẽ tự xuống dòng
+          // khi màn hình hẹp). Xóa: đổi lại "repeat(auto-fit,minmax(140px,1fr))" để cho phép tự xuống dòng như cũ.
+          return `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;">
+            ${wbCard('Tổng Net PnL% OOS (tham khảo)',(st.totalOosPct>=0?'+':'')+st.totalOosPct.toFixed(1)+'%')}
+            ${wbCard('Tổng lệnh IS (tất cả config)',totalIsTrades.toLocaleString())}
+            ${wbCard('Tổng lệnh OOS (tất cả config)',totalOosTrades.toLocaleString())}
+          </div>`;
+        })()}
         <!-- Danh sách config đã chọn từng đoạn, chuyển tiếp sang Monte Carlo — modul con, xóa khối này + field
         "showSegList" để gỡ riêng, không ảnh hưởng 4 công thức phía trên hay Monte Carlo phía dưới. -->
         <div style="margin-top:8px;">
@@ -3665,6 +3721,9 @@ function wfo_boxHtml(){
                 <th style="padding:5px 7px;text-align:left;">#</th>
                 <th style="padding:5px 7px;text-align:left;">IS → OOS</th>
                 <th style="padding:5px 7px;text-align:left;">Tham số thắng</th>
+                <!-- ★ BOX ĐỘC LẬP (Độ dốc filter) — cột "k IS" chỉ có ý nghĩa khi wfoState.slopeOn bật (Optimizer tự
+                dò k trong slopeKs mỗi đoạn IS). Tắt slopeOn → luôn hiện "-". Xóa: xóa th này + td tương ứng bên dưới. -->
+                <th style="padding:5px 7px;text-align:right;" title="Hệ số k (so với nến trước mấy bước) mà Optimizer chọn là tốt nhất cho đoạn IS này, trong số các k đã tick ở box Độ dốc filter">k IS</th>
                 <th style="padding:5px 7px;text-align:right;" title="Số lệnh của tổ hợp thắng khi chạy Optimize trên IS">Lệnh IS</th>
                 <th style="padding:5px 7px;text-align:right;" title="Net PnL% (đã trừ phí) của tổ hợp thắng, TRÊN CHÍNH đoạn IS đã tối ưu ra nó">Kết quả IS</th>
                 <th style="padding:5px 7px;text-align:right;">Lệnh OOS</th>
@@ -3681,6 +3740,7 @@ function wfo_boxHtml(){
                     <td style="padding:5px 7px;color:var(--dim);">${i+1}</td>
                     <td style="padding:5px 7px;color:var(--dim);white-space:nowrap;">${wfo_dmy(seg.seg.isStart)}→${wfo_dmy(seg.seg.isEnd)} · <span style="color:var(--hi)">${wfo_dmy(seg.seg.oosStart)}→${wfo_dmy(seg.seg.oosEnd)}</span></td>
                     <td style="padding:5px 7px;color:var(--dim);">${w.entrySignal.toUpperCase()} ${w.entryTf} · ${w.dir} · Lv${w.level} · TP${w.tp}/SL${w.sl} · P${w.period} · ${esc(indTxt)}</td>
+                    <td style="padding:5px 7px;text-align:right;color:${s.slopeOn?'var(--acc)':'var(--dim)'};font-weight:${s.slopeOn?'700':'400'};">${s.slopeOn&&w.slopeK!=null?w.slopeK:'-'}</td>
                     <td style="padding:5px 7px;text-align:right;color:var(--dim);">${w.trades}</td>
                     <td style="padding:5px 7px;text-align:right;color:var(--dim);">${seg.isPct>=0?'+':''}${seg.isPct.toFixed(1)}%</td>
                     <td style="padding:5px 7px;text-align:right;color:var(--hi);">${seg.trades}</td>
@@ -3743,17 +3803,15 @@ function wfo_plateauInfoModalHtml(){
         <span onclick="wfoState.showPlateauInfo=false;renderUtility()" style="cursor:pointer;font-size:16px;color:var(--dim);padding:0 4px;">✕</span>
       </div>
       <div style="font-size:11px;color:var(--hi);line-height:1.6;">
-        <b>Bước 1 — Sắp xếp:</b> lấy toàn bộ tổ hợp TP/SL/RSI đã thỏa "Số lệnh tối thiểu"/"Win rate tối thiểu" trong IS, sắp theo Net PnL (đã trừ phí) từ cao xuống thấp.
+        <b>Bước 1 — Sắp xếp:</b> lấy toàn bộ tổ hợp TP/SL/RSI đã thỏa "Số lệnh tối thiểu"/"Win rate tối thiểu"/"Net PnL%≥" trong IS, sắp theo Net PnL (đã trừ phí) từ cao xuống thấp.
         <br><br>
-        <b>Bước 2 — Lấy Top 30%:</b> chỉ giữ lại 30% số dòng đứng đầu (nhóm đã đủ tốt, loại hết vùng lỗ) — không xét cao nguyên trên toàn bộ danh sách, để tránh chọn nhầm 1 "vùng phẳng nhưng toàn lỗ".
-        <br><br>
-        <b>Bước 3 — Tìm hàng xóm:</b> với mỗi tổ hợp trong Top 30%, tìm các tổ hợp KHÁC có cùng RSI period/hướng lệnh/entry TF/filter TF, chỉ khác đúng TP hoặc SL lệch 1 bậc liền kề trong bảng giá trị (ví dụ TP=2.5 thì hàng xóm là TP=2 và TP=3).
+        <b>Bước 2 — Tìm hàng xóm:</b> với MỖI tổ hợp trong TOÀN BỘ danh sách (không cắt bớt theo % nào cả — bản thân phép tính hàng xóm ở bước sau đã tự loại đỉnh nhọn, không cần lọc trước), tìm các tổ hợp KHÁC có cùng RSI period/hướng lệnh/entry TF/filter TF, chỉ khác đúng TP hoặc SL lệch 1 bậc liền kề trong bảng giá trị (ví dụ TP=2.5 thì hàng xóm là TP=2 và TP=3).
         <br><br>
         <b>Công thức điểm cao nguyên:</b>
         <div style="background:var(--bg0);border-radius:8px;padding:8px 10px;margin:6px 0;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--acc);">
           điểm(x) = trung bình NetPnL của [ x + các hàng xóm tìm được ]
         </div>
-        <b>Bước 4 — Chọn winner:</b> trong nhóm Top 30%, lấy tổ hợp có điểm cao nguyên CAO NHẤT — không phải tổ hợp có NetPnL riêng cao nhất.
+        <b>Bước 3 — Chọn winner:</b> trong TOÀN BỘ danh sách, lấy tổ hợp có điểm cao nguyên CAO NHẤT — không phải tổ hợp có NetPnL riêng cao nhất. (Trước đây có bước cắt riêng "chỉ xét Top 30%" trước khi tính điểm cao nguyên — đã bỏ, vì có thể loại nhầm đúng vùng cao nguyên thật sự ổn định nhưng NetPnL cá nhân không đủ nổi bật để lọt top 30%.)
         <br><br>
         <b>Vì sao khác "Lời nhất (top-1)":</b> top-1 chỉ nhìn đúng 1 con số của chính nó, dễ chọn nhầm "đỉnh nhọn" (số đẹp do ăn may, hàng xóm toàn xấu). Vùng cao nguyên ưu tiên tổ hợp mà xung quanh nó cũng tốt — ít nhạy cảm với sai số nhỏ, đáng tin hơn khi mang ra trade thật.
         <br><br>
@@ -3830,6 +3888,7 @@ function wfo_lastWinnerHtml(){
     <div style="font-size:10px;color:var(--dim);margin-top:3px;">${w.entrySignal.toUpperCase()} ${w.entryTf} · dir ${w.dir} · TP ${w.tp}% · SL ${w.sl}% · period ${w.period} · level ${w.level} · ${esc(indTxt)} · Hạng gốc #${fc.rawRank}/${fc.rawTotal}</div>`;
 }
 // END BOX ĐỘC LẬP — WFO RUNNER + MONTE CARLO
+
 
 // init
 renderOptimizer();
