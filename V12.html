@@ -281,6 +281,10 @@ function optCfgObj(r){
     // kết quả) — KHÔNG dùng optState.slopeK vì đó chỉ là biến tạm trong vòng lặp dò k, không phản ánh đúng tổ hợp
     // đang export. Xóa: xóa dòng "...(optState.slopeOn?...)" này để gỡ, không ảnh hưởng gì khác.
     ...(optState.slopeOn?{slopeOn:true,slopeK:r.slopeK||1}:{}),
+    // ★ BOX ĐỘC LẬP (ADX) — chỉ xuất khi đang BẬT, dùng r.adxTf/r.adxThreshold (TF/ngưỡng thắng của ĐÚNG tổ hợp
+    // này, lưu lúc runOptimizer() push kết quả) — KHÔNG dùng optState.adxTfs/adxThresholds (đó là danh sách để
+    // DÒ, không phải giá trị thắng). Xóa: xóa dòng "...(optState.adxOn?...)" này để gỡ, không ảnh hưởng gì khác.
+    ...(optState.adxOn?{adxOn:true,adxTf:r.adxTf||'1d',adxThreshold:r.adxThreshold??25}:{}),
   };
 }
 function optCfgDefName(r){
@@ -518,6 +522,43 @@ function calcOBVdiff(closes,volumes,emaPeriod=20){
   for(let i=1;i<closes.length;i++){obv[i]=closes[i]>closes[i-1]?obv[i-1]+volumes[i]:closes[i]<closes[i-1]?obv[i-1]-volumes[i]:obv[i-1];}
   const ema=calcEMA(obv,emaPeriod);return obv.map((o,i)=>o-ema[i]);
 }
+// ★ BOX ĐỘC LẬP (ADX — thử nghiệm trong CHECK INDICATORS trước khi lắp vào Optimizer/Backtest) — đúng 6 bước
+// Wilder chuẩn: DM/TR thô (dòng "upMove/downMove/tr") → làm mượt kiểu Wilder 14 kỳ CHO CẢ +DM/-DM/TR (không phải
+// SMA/EMA thường — trừ đi 1/period rồi cộng giá trị mới, khác hẳn calcEMA() ở trên) → +DI/-DI (chuẩn hóa theo TR)
+// → DX (% chênh lệch +DI/-DI) → ADX = trung bình đơn giản của "period" giá trị DX đầu, sau đó làm mượt Wilder tiếp.
+// Không có dấu +/- (luôn ≥0, chỉ đo ĐỘ MẠNH xu hướng, không đo hướng) — khác hẳn calcMacdHist/calcCMF/calcOBVdiff.
+// Xóa: xóa hàm calcADX này để gỡ, không ảnh hưởng gì khác (chưa có chỗ nào khác gọi tới ngoài CHK_FILTERS bên dưới).
+function calcADX(highs,lows,closes,period=14){
+  const n=closes.length;
+  const adx=new Array(n).fill(null);
+  if(n<period*2+1)return adx;
+  const tr=new Array(n).fill(0), pdm=new Array(n).fill(0), mdm=new Array(n).fill(0);
+  for(let i=1;i<n;i++){
+    const upMove=highs[i]-highs[i-1], downMove=lows[i-1]-lows[i];
+    pdm[i]=(upMove>downMove&&upMove>0)?upMove:0;
+    mdm[i]=(downMove>upMove&&downMove>0)?downMove:0;
+    tr[i]=Math.max(highs[i]-lows[i],Math.abs(highs[i]-closes[i-1]),Math.abs(lows[i]-closes[i-1]));
+  }
+  let smTR=0,smPDM=0,smMDM=0;
+  for(let i=1;i<=period;i++){ smTR+=tr[i]; smPDM+=pdm[i]; smMDM+=mdm[i]; }
+  const dx=new Array(n).fill(null);
+  let plusDI=smTR?100*smPDM/smTR:0, minusDI=smTR?100*smMDM/smTR:0;
+  dx[period]=(plusDI+minusDI)?100*Math.abs(plusDI-minusDI)/(plusDI+minusDI):0;
+  for(let i=period+1;i<n;i++){
+    smTR=smTR-smTR/period+tr[i];
+    smPDM=smPDM-smPDM/period+pdm[i];
+    smMDM=smMDM-smMDM/period+mdm[i];
+    plusDI=smTR?100*smPDM/smTR:0; minusDI=smTR?100*smMDM/smTR:0;
+    dx[i]=(plusDI+minusDI)?100*Math.abs(plusDI-minusDI)/(plusDI+minusDI):0;
+  }
+  let sumDx=0,cnt=0;
+  for(let i=period;i<Math.min(n,period*2);i++){ if(dx[i]!=null){sumDx+=dx[i];cnt++;} }
+  if(cnt<period)return adx;
+  let adxVal=sumDx/period;
+  adx[period*2-1]=adxVal;
+  for(let i=period*2;i<n;i++){ adxVal=(adxVal*(period-1)+dx[i])/period; adx[i]=adxVal; }
+  return adx;
+}
 function bsearchMacd(opens,hist,signalTs,periodMs){
   let lo=0,hi=opens.length-1,res=-1;
   while(lo<=hi){const mid=(lo+hi)>>1;if(opens[mid]+periodMs<=signalTs){res=mid;lo=mid+1;}else hi=mid-1;}
@@ -548,6 +589,19 @@ function optSlopePass(data,idx,dir){
   if(vK==null)return false;
   const vI=data.hist[idx];
   return dir==='buy'?vI>vK:vI<vK;
+}
+// ★ BOX ĐỘC LẬP (ADX) — lọc "base" (trades thô vừa sinh ra, CHƯA qua 6 box MACD/CMF/OBV) theo ngưỡng ADX tại
+// đúng TF đang dò — không xét dấu +/-, không xét dir (mua/bán đều dùng chung 1 điều kiện). Dùng lại đúng
+// bsearchMacdIdx() có sẵn (không viết hàm bisect mới) để căn đúng nến ADX đã ĐÓNG trước nến tín hiệu (t.rawTs),
+// giống hệt cách 6 box MACD/CMF/OBV đang căn thời gian. adxSet=null (ADX tắt) → trả nguyên "trades", không lọc gì.
+// Xóa: xóa hàm này để gỡ, không ảnh hưởng optSlopePass()/6 box INDICATOR_BOXES.
+function optAdxFilter(trades,adxSet,threshold){
+  if(!adxSet)return trades;
+  return trades.filter(t=>{
+    const idx=bsearchMacdIdx(adxSet.opens,t.rawTs,adxSet.pMs);
+    const v=idx>=0?adxSet.hist[idx]:null;
+    return v!=null&&v>=threshold;
+  });
 }
 
 // ★ FIX (thứ tự Max lệnh cùng lúc) — trước đây maxOrders bị áp NGAY LÚC sinh tín hiệu thô, trước cả khi lọc
@@ -721,6 +775,17 @@ let optState = {
   // trong 6 filter của INDICATOR_BOXES (đổi về đúng 1 dòng "return v!==null&&(dir==='buy'?v>0:v<0);") để gỡ sạch.
   // slopeK ĐANG là biến TẠM (được gán lần lượt trong vòng lặp combo bên dưới) — danh sách k cần dò nằm ở slopeKs.
   slopeOn:false, slopeK:1, slopeKs:[1],
+  // ★ BOX ĐỘC LẬP (ADX) — "cổng lọc" trend/sideway, KHÔNG xét dấu +/-, KHÔNG phụ thuộc 6 box MACD/CMF/OBV, tự tải
+  // tự tính TF riêng. Bật thì chỉ cho tín hiệu entry đi tiếp nếu ADX (tại TF/ngưỡng đang dò) ≥ ngưỡng — áp dụng
+  // NGAY SAU khi sinh tín hiệu thô (base=eb.generate(...)), TRƯỚC vòng lặp 6-box, nên vẫn hoạt động dù tắt hết
+  // MACD/CMF/OBV. Tắt (adxOn=false, mặc định) → không tải nến ADX, không lọc gì thêm, y hệt hành vi gốc.
+  // adxTfs/adxThresholds là mảng multi-select (dò tổ hợp, giống slopeKs) — biến adxTf/adxThreshold bên dưới là
+  // biến TẠM được gán trong vòng lặp combo. Xóa: xóa 4 field "adxOn/adxTf/adxThreshold/adxTfs/adxThresholds" này
+  // + hàm calcADX()/optAdxFilter() + khối tải nến ADX trong runOptimizer() + 2 vòng lặp "for(const adxTf...)"/
+  // "for(const adxThr...)" (bỏ thụt lề khối bên trong ra ngoài 2 cấp, đổi "gated" thành "base") + phần
+  // "...(optState.adxOn?{adxTf,adxThreshold:adxThr}:{})" trong res.push() + phần adx trong optCfgObj() + box UI
+  // trong renderOptimizer() để gỡ sạch, không ảnh hưởng slope filter hay 6 box MACD/CMF/OBV.
+  adxOn:false, adxTf:'1d', adxThreshold:25, adxTfs:['1d'], adxThresholds:[25],
   filterPeriod:null, filterDir:null, running:false,
   dedupKeys:[],
   progress:0, total:0, results:[], statusMsg:'', activeBoxKeys:[],
@@ -731,7 +796,13 @@ let optState = {
 };
 
 const OPT_RSI         = [35, 40, 45, 50, 55, 60, 65];
-const OPT_TP          = [1, 1.5, 2, 2.5, 3, 4, 5];
+// ★ BOX ĐỘC LẬP (nấc OPT_TP/OPT_SL) — chỉ đổi 2 mảng hằng số này, KHÔNG đụng bất kỳ thuật toán/vòng lặp nào khác
+// (đã kiểm tra toàn bộ chỗ dùng OPT_TP/OPT_SL đều đọc động qua .length/.indexOf(), không hardcode số lượng hay
+// giá trị). Lịch sử: gốc [1,1.5,2,2.5,3,4,5]/[0.5,1,1.5,2,2.5,3] → mở rộng thử tới 10% → hạ về max 5% dùng chung
+// 1 bộ nấc [0.5,1,1.5,2,2.5,3,4,5] cho cả 2 → hạ tiếp về max 3% (nấc hiện tại) vì 5% vẫn hơi cao so với thực tế.
+// Xóa/khôi phục bản gốc ban đầu: đổi lại thành "const OPT_TP=[1,1.5,2,2.5,3,4,5];" và
+// "const OPT_SL=[0.5,1,1.5,2,2.5,3];" để gỡ, không ảnh hưởng gì khác.
+const OPT_TP          = [0.5, 1, 1.5, 2, 2.5, 3];
 const OPT_SL          = [0.5, 1, 1.5, 2, 2.5, 3];
 const OPT_DIRS        = ['buy','sell'];
 const OPT_RSI_PERIODS = [7, 10, 14, 21];
@@ -781,12 +852,14 @@ async function runOptimizer(){
   })();
 
   const combos=activeEntries.length*OPT_RSI_PERIODS.length*OPT_DIRS.length*OPT_RSI.length
-    *OPT_TP.length*OPT_SL.length*allIndCombos.length*(optState.slopeOn?optState.slopeKs.length:1); // ★ BOX ĐỘC LẬP (Độ dốc filter) — xóa "*(optState.slopeOn?...)" để gỡ, quay về đếm tổ hợp không tính k.
+    *OPT_TP.length*OPT_SL.length*allIndCombos.length*(optState.slopeOn?optState.slopeKs.length:1) // ★ BOX ĐỘC LẬP (Độ dốc filter) — xóa "*(optState.slopeOn?...)" để gỡ, quay về đếm tổ hợp không tính k.
+    *(optState.adxOn?optState.adxTfs.length*optState.adxThresholds.length:1); // ★ BOX ĐỘC LẬP (ADX) — xóa "*(optState.adxOn?...)" này để gỡ, quay về đếm tổ hợp không tính ADX.
   optState.total=combos;
 
   const entryCandles={};
   const entryHists={};
   const boxData={};
+  const adxData={}; // ★ BOX ĐỘC LẬP (ADX) — khai báo ngoài try để dùng lại ở vòng lặp combo bên dưới, giống entryCandles/boxData.
   try{
     // Load entry candles + pre-compute hist theo từng period
     for(const eb of activeEntries){
@@ -814,6 +887,18 @@ async function runOptimizer(){
         boxData[box.key][tf]={opens:cl.map(c=>c[0]),hist:box.buildHist(cl),pMs};
       }
     }
+    // ★ BOX ĐỘC LẬP (ADX) — tải nến RIÊNG, không đụng entryCandles/boxData ở trên. Tắt (adxOn=false) → bỏ qua
+    // hoàn toàn, không tải gì (y hệt cách 6 box MACD/CMF/OBV bị tắt cũng được continue/bỏ qua ở trên).
+    if(optState.adxOn){
+      for(const tf of optState.adxTfs){
+        optState.statusMsg=`Đang tải ADX ${tf.toUpperCase()}...`;
+        renderOptimizer();
+        const pMs=MACD_TF_MS[tf]||86400000;
+        const raw=await fetchKlines(optState.coin,startTs-MACD_WARM_UP*pMs,endTs,tf);
+        const cl=raw.slice(0,-1);
+        adxData[tf]={opens:cl.map(c=>c[0]),hist:calcADX(cl.map(c=>+c[2]),cl.map(c=>+c[3]),cl.map(c=>+c[4]),14),pMs};
+      }
+    }
   }catch(e){
     optState.statusMsg='❌ Lỗi: '+e.message;optState.running=false;renderOptimizer();return;
   }
@@ -828,6 +913,15 @@ async function runOptimizer(){
           for(const tp of OPT_TP){
             for(const sl of OPT_SL){
               const base=eb.generate(entryCandles[eb.key],entryHists[eb.key][period],dir,startTs,endTs,level,tp,sl,0);
+              // ★ BOX ĐỘC LẬP (ADX) — dò qua từng TF trong adxTfs × từng ngưỡng trong adxThresholds (chỉ khi adxOn
+              // bật), lọc "base" NGAY TẠI ĐÂY (trước cả 6 box MACD/CMF/OBV) — coi TF/ngưỡng như 2 tham số tổ hợp
+              // giống TP/SL/level. Tắt adxOn → chạy đúng 1 vòng (gatedThr=base nguyên vẹn, không lọc gì). Xóa: xóa 2
+              // vòng "for(const adxTf...)"/"for(const adxThr...)" này (bỏ thụt lề khối bên trong ra ngoài 2 cấp,
+              // đổi "gated" thành "base") + phần "...(optState.adxOn?{adxTf,adxThreshold:adxThr}:{})" trong
+              // res.push() để gỡ, quay về dùng thẳng "base" như cũ.
+              for(const adxTf of (optState.adxOn?optState.adxTfs:[null])){
+                for(const adxThr of (optState.adxOn?optState.adxThresholds:[null])){
+                  const gatedThr=optState.adxOn?optAdxFilter(base,adxData[adxTf],adxThr):base;
               // ★ BOX ĐỘC LẬP (Độ dốc filter) — dò qua từng k trong optState.slopeKs (chỉ khi slopeOn bật), coi k
               // như 1 tham số tổ hợp giống TP/SL/level. Tắt slopeOn → chạy đúng 1 vòng (k=1, không ảnh hưởng vì
               // optSlopePass() trả true ngay khi slopeOn=false, k lúc này vô nghĩa). Xóa: xóa nguyên vòng
@@ -836,7 +930,7 @@ async function runOptimizer(){
               for(const k of (optState.slopeOn?optState.slopeKs:[1])){
                 optState.slopeK=k;
                 for(const combo of allIndCombos){
-                  let ft=base;
+                  let ft=gatedThr;
                   for(let i=0;i<INDICATOR_BOXES.length;i++){
                     const tf=combo[i];
                     if(tf&&tf!=='none') ft=INDICATOR_BOXES[i].filter(ft,boxData[INDICATOR_BOXES[i].key][tf],dir);
@@ -856,14 +950,23 @@ async function runOptimizer(){
                       entrySignal:eb.signal,entryTf:optState[eb.key].tf,
                       ...tfRes,
                       ...(optState.slopeOn?{slopeK:k}:{}), // ★ BOX ĐỘC LẬP (Độ dốc filter) — lưu đúng k thắng của tổ hợp này
+                      ...(optState.adxOn?{adxTf,adxThreshold:adxThr}:{}), // ★ BOX ĐỘC LẬP (ADX) — lưu đúng TF/ngưỡng thắng của tổ hợp này
                       trades:sum.closed,wins:sum.wins,losses:sum.losses,
-                      wr:parseFloat(wr.toFixed(1)),pnl:parseFloat(sum.totalPnl.toFixed(2))
+                      wr:parseFloat(wr.toFixed(1)),pnl:parseFloat(sum.totalPnl.toFixed(2)),
+                      kRatio:wfo_kRatio(ft) // ★ BOX ĐỘC LẬP (K-Ratio) — luôn tính sẵn (rẻ, dùng lại "ft" đang có trong scope, không tải/tính lại
+                      // gì), lưu 1 số vào mỗi dòng kết quả. Optimizer đứng riêng (không qua WFO) không đọc field này, không ảnh hưởng
+                      // bảng/hành vi Optimizer. Chỉ wfo_pickWinner() đọc lại field này để lọc — xem chỉ dẫn xóa đầy đủ ở wfo_kRatio().
+                      // Xóa: xóa dòng "kRatio:wfo_kRatio(ft)" này (giữ nguyên dấu phẩy dòng trên) để gỡ, cùng với xóa hàm wfo_kRatio()
+                      // + đoạn lọc "pool" trong wfo_pickWinner() + box UI toggle trong wfo_boxHtml() để gỡ sạch toàn bộ K-Ratio.
                     });
                   }
                   done++;
                   if(done%200===0){optState.progress=done;renderOptimizerProgress();}
                 }
               }
+              // ★ BOX ĐỘC LẬP (ADX) — đóng 2 vòng "for(const adxThr...)"/"for(const adxTf...)" mở ở trên.
+              }
+            }
             }
           }
         }
@@ -926,6 +1029,11 @@ function optRowHtml(r,idx,activeCols){
     +`<td style="color:${wrc};font-weight:800">${r.wr}%</td>`
     +`<td style="color:${pc};font-weight:800">${r.pnl>=0?'+':''}${r.pnl}%</td>`
     +`<td style="color:${nc};font-weight:800">${net>=0?'+':''}${net.toFixed(2)}%</td>`
+    +(optState.adxOn?( // ★ BOX ĐỘC LẬP (cột ADX bảng Optimizer) — 2 <td> này CHỈ render khi optState.adxOn bật. Xóa cả khối "+(optState.adxOn?...)" này để gỡ, không ảnh hưởng cột nào khác.
+      r.adxTf!=null
+        ?`<td style="color:#c026d3;font-weight:700">${r.adxTf.toUpperCase()}</td><td style="color:#c026d3;font-weight:700">≥${r.adxThreshold}</td>`
+        :`<td style="color:var(--dim)">—</td><td style="color:var(--dim)">—</td>`
+    ):'')
     +`<td><span onclick='saveOptConfig(${JSON.stringify(r).replace(/'/g,"\\'")})' style="font-size:11px;color:var(--grn);background:rgba(22,163,74,.08);border:1px solid var(--grn);border-radius:6px;padding:2px 7px;cursor:pointer;">💾</span></td>`
     +`</tr>`;
 }
@@ -1027,6 +1135,26 @@ function renderOptimizer(){
       </div>
     </div>
 
+    <!-- ★ BOX ĐỘC LẬP (ADX) — "cổng lọc" trend/sideway độc lập, KHÔNG áp cho box nào, tự tải/tự tính TF riêng.
+    Đặt TRƯỚC box "Độ dốc filter" vì flow thực tế: ADX gate chạy NGAY sau tín hiệu entry thô, trước cả slope/6 box
+    MACD/CMF/OBV (xem runOptimizer(): optAdxFilter() gọi trước vòng "for(const k of slopeKs)"). Xóa: xóa div này
+    (cả 2 khối: toggle + chọn TF/ngưỡng) để gỡ riêng phần UI, không ảnh hưởng gì khác (field/hàm xóa riêng theo chỉ
+    dẫn ở optState/optAdxFilter/runOptimizer). -->
+    <div style="display:flex;align-items:center;gap:8px;background:rgba(192,38,211,.05);border:1px solid #c026d3;border-radius:8px;padding:6px 10px;margin-bottom:8px;">
+      <button onclick="optState.adxOn=!optState.adxOn;renderOptimizer()" style="padding:4px 10px;border-radius:6px;cursor:pointer;font:700 10px/1 'Outfit',sans-serif;background:${o.adxOn?'rgba(192,38,211,.1)':'var(--bg0)'};border:1px solid ${o.adxOn?'#c026d3':'var(--b2)'};color:${o.adxOn?'#c026d3':'var(--dim)'};">${o.adxOn?'✓ Bật':'⬜ Tắt'}</button>
+      <span style="font-size:10px;font-weight:700;color:${o.adxOn?'#c026d3':'var(--dim)'};">ADX filter (tải tính TF riêng độc lập, không liên quan Filter)</span>
+    </div>
+    ${o.adxOn?`<div style="background:rgba(192,38,211,.05);border:1px solid #c026d3;border-top:none;border-radius:0 0 8px 8px;padding:6px 10px;margin-top:-8px;margin-bottom:8px;">
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+        <span style="font-size:9px;color:var(--dim);">TF ADX (tick nhiều để dò tổ hợp):</span>
+        ${TRADE_TFS.map(tf=>`<button onclick="const i=optState.adxTfs.indexOf('${tf}');if(i>=0){if(optState.adxTfs.length>1)optState.adxTfs.splice(i,1);}else optState.adxTfs.push('${tf}');renderOptimizer()" style="padding:3px 8px;border-radius:5px;cursor:pointer;font:700 10px/1 'JetBrains Mono',monospace;background:${o.adxTfs.includes(tf)?'#c026d3':'var(--bg0)'};border:1px solid ${o.adxTfs.includes(tf)?'#c026d3':'var(--b2)'};color:${o.adxTfs.includes(tf)?'#fff':'var(--dim)'};">${tf.toUpperCase()}</button>`).join('')}
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        <span style="font-size:9px;color:var(--dim);">Ngưỡng ADX≥ (tick nhiều để dò tổ hợp):</span>
+        ${[15,20,25,30,35,40].map(v=>`<button onclick="const i=optState.adxThresholds.indexOf(${v});if(i>=0){if(optState.adxThresholds.length>1)optState.adxThresholds.splice(i,1);}else optState.adxThresholds.push(${v});optState.adxThresholds.sort((a,b)=>a-b);renderOptimizer()" style="padding:3px 8px;border-radius:5px;cursor:pointer;font:700 10px/1 'JetBrains Mono',monospace;background:${o.adxThresholds.includes(v)?'#c026d3':'var(--bg0)'};border:1px solid ${o.adxThresholds.includes(v)?'#c026d3':'var(--b2)'};color:${o.adxThresholds.includes(v)?'#fff':'var(--dim)'};">${v}</button>`).join('')}
+      </div>
+    </div>`:''}
+
     <!-- ★ BOX ĐỘC LẬP (Độ dốc filter) — bật thì áp thêm cho CẢ 6 filter MACD/CMF/OBV (trade+trend) bên dưới.
     Xóa: xóa div này để gỡ riêng phần UI, không ảnh hưởng gì khác (field/hàm xóa riêng theo chỉ dẫn ở optState/optSlopePass). -->
     <div style="display:flex;align-items:center;gap:8px;background:rgba(79,70,229,.05);border:1px solid var(--acc);border-radius:8px;padding:6px 10px;margin-bottom:8px;">
@@ -1041,6 +1169,7 @@ function renderOptimizer(){
       <span style="font-size:9px;color:var(--dim);">so với nến trước k bước (tick nhiều để dò tổ hợp):</span>
       ${[1,2,3,4,5,6,7,8,9,10].map(k=>`<button onclick="const i=optState.slopeKs.indexOf(${k});if(i>=0){if(optState.slopeKs.length>1)optState.slopeKs.splice(i,1);}else optState.slopeKs.push(${k});optState.slopeKs.sort((a,b)=>a-b);renderOptimizer()" style="padding:3px 8px;border-radius:5px;cursor:pointer;font:700 10px/1 'JetBrains Mono',monospace;background:${o.slopeKs.includes(k)?'var(--acc)':'var(--bg0)'};border:1px solid ${o.slopeKs.includes(k)?'var(--acc)':'var(--b2)'};color:${o.slopeKs.includes(k)?'#fff':'var(--dim)'};">${k}</button>`).join('')}
     </div>`:''}
+
     <div style="font-size:10px;color:var(--acc);font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">🔵 BỘ LỌC TRADE (AND · thuận chiều)</div>
     ${INDICATOR_BOXES.filter(b=>b.group==='trade').map(b=>indBoxHtml(b)).join('')}
 
@@ -1146,9 +1275,10 @@ function renderOptimizer(){
           <th>#</th><th>Entry</th>
           ${INDICATOR_BOXES.filter(b=>o.activeBoxKeys.includes(b.key)).map(b=>`<th style="color:${b.color}">${b.label.replace(' · P20','').replace(' · EMA20','')}</th>`).join('')}
           <th>P</th><th>Dir</th><th>Lv</th><th>TP%</th><th>SL%</th><th>R:R</th>
-          <th>Lệnh</th><th>WIN</th><th>LOSS</th><th>WR%</th><th>PnL%</th><th>Net%</th><th></th>
+          <th>Lệnh</th><th>WIN</th><th>LOSS</th><th>WR%</th><th>PnL%</th><th>Net%</th>${o.adxOn?'<th style="color:#c026d3">ADX TF</th><th style="color:#c026d3">ADX ≥</th>':''}<th></th>
         </tr></thead>
-        <tbody id="optTbody">${(()=>{const sorted=optFilteredResults();const activeCols=INDICATOR_BOXES.filter(b=>o.activeBoxKeys.includes(b.key));optView={sorted,activeCols,totalCols:15+activeCols.length,rowH:24,headerH:30,_measured:false};return '';})()}</tbody>
+        <!-- BOX DOC LAP (cot ADX bang Optimizer): 2 th chi hien khi optState.adxOn bat. Go: bo phan dieu kien o.adxOn o thead nay, bo (o.adxOn?2:0) trong totalCols duoi day, va bo 2 td tuong ung trong optRowHtml(). Khong dung cot nao khac. -->
+        <tbody id="optTbody">${(()=>{const sorted=optFilteredResults();const activeCols=INDICATOR_BOXES.filter(b=>o.activeBoxKeys.includes(b.key));optView={sorted,activeCols,totalCols:15+activeCols.length+(o.adxOn?2:0),rowH:24,headerH:30,_measured:false};return '';})()}</tbody>
       </table></div>
     </div>
     `:(!o.running&&o.statusMsg.includes('✅')?`<div style="margin-top:12px;text-align:center;padding:20px;color:var(--dim);font-size:13px;">⚠ Không tìm thấy tổ hợp nào thỏa điều kiện.<br><span style="font-size:11px;">Thử giảm Win Rate mục tiêu hoặc số lệnh tối thiểu.</span></div>`:'')}
@@ -1166,7 +1296,7 @@ let indChk={
   entrySig:'rsi',   // 'rsi' | 'mfi' — loại trừ, chỉ 1 tại 1 thời điểm
   period:14,        // 7 | 10 | 14 | 21
   entryTf:'1h',     // TF nến tín hiệu (bắt buộc trước khi nhập filter)
-  macd:'', cmf:'', obv:'',   // TF bộ lọc — căn theo nến tín hiệu
+  macd:'', cmf:'', obv:'', adx:'',   // TF bộ lọc — căn theo nến tín hiệu (adx: ★ BOX ĐỘC LẬP, xóa field này để gỡ)
   loading:false, results:[], error:''
 };
 
@@ -1180,6 +1310,11 @@ const CHK_FILTERS=[
   {key:'macd', ind:'MACD', label:'MACD hist', limit:200,  buildHist:cl=>calcMacdHist(cl.map(c=>+c[4]))},
   {key:'cmf',  ind:'CMF',  label:'CMF P20',   limit:200,  buildHist:cl=>calcCMF(cl.map(c=>+c[2]),cl.map(c=>+c[3]),cl.map(c=>+c[4]),cl.map(c=>+c[5]),20)},
   {key:'obv',  ind:'OBV',  label:'OBV diff',  limit:1000, buildHist:cl=>calcOBVdiff(cl.map(c=>+c[4]),cl.map(c=>+c[5]),20)},
+  // ★ BOX ĐỘC LẬP (ADX) — dùng MACD_WARM_UP*2 (=400) nến để đủ warmup Wilder (~150 nến) + dư dả kiểm chứng, nhiều
+  // hơn MACD/CMF (200) vì ADX cần làm mượt 2 lớp (DM/TR rồi tới DX). hasSign:false = không tô DƯƠNG/ÂM (ADX luôn
+  // ≥0, không có dấu, chỉ đo độ mạnh trend). Xóa: xóa dòng object này khỏi mảng CHK_FILTERS để gỡ riêng ADX khỏi
+  // CHECK INDICATORS, không ảnh hưởng MACD/CMF/OBV.
+  {key:'adx',  ind:'ADX',  label:'ADX P14',   limit:MACD_WARM_UP*2, hasSign:false, buildHist:cl=>calcADX(cl.map(c=>+c[2]),cl.map(c=>+c[3]),cl.map(c=>+c[4]),14)},
 ];
 function setChkSig(s){indChk.entrySig=s;renderUtility();}
 function setChkPeriod(p){indChk.period=p;renderUtility();}
@@ -1220,7 +1355,10 @@ async function runIndCheck(){
       const pMs=_CHK_TF_MS[tf]||3600000;
       const hit=_chkBsearch(opens,arr,rawTs,pMs);
       if(!hit||hit.val==null){results.push({ind:f.ind,label:f.label,tf,val:null,sign:null,ts:'',ok:false,err:'không đủ nến trước tín hiệu'});continue;}
-      results.push({ind:f.ind,label:f.label,tf,val:hit.val,sign:hit.val>0?'DƯƠNG':'ÂM',ts:_chkFmt(hit.ts),ok:true,role:'filter'});
+      // ★ BOX ĐỘC LẬP (ADX) — f.hasSign===false (chỉ đúng cho ADX) thì không gán nhãn DƯƠNG/ÂM, vì ADX luôn ≥0,
+      // không có dấu, hiển thị thẳng số. Xóa: xóa điều kiện "f.hasSign===false?null:" (giữ lại nhánh còn lại) để
+      // gỡ riêng phần này, không ảnh hưởng MACD/CMF/OBV vẫn tô DƯƠNG/ÂM như cũ.
+      results.push({ind:f.ind,label:f.label,tf,val:hit.val,sign:f.hasSign===false?null:(hit.val>0?'DƯƠNG':'ÂM'),ts:_chkFmt(hit.ts),ok:true,role:'filter'});
     }
   }catch(e){ indChk.results=[{ind:'LỖI',label:'Lỗi',tf:'',val:null,sign:null,ts:'',ok:false,err:e.message}]; indChk.loading=false; renderUtility(); return; }
   indChk.results=results; indChk.loading=false; renderUtility();
@@ -1338,7 +1476,7 @@ function renderUtility(){
 
     <div style="background:var(--bg1);border:1px solid var(--b1);border-radius:12px;padding:14px;margin-bottom:0;">
       <div onclick="subBoxOpen.chk=!subBoxOpen.chk;renderUtility()" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-bottom:${subBoxOpen.chk?'10px':'0'};">
-        <div style="font-size:11px;font-weight:900;color:var(--grn);letter-spacing:1px;">📊 CHECK INDICATORS — MACD/CMF/OBV căn theo nến tín hiệu RSI/MFI <span style="font-weight:600;color:var(--dim);">(giờ máy)</span></div>
+        <div style="font-size:11px;font-weight:900;color:var(--grn);letter-spacing:1px;">📊 CHECK INDICATORS - Tải tính riêng không dùng lại Optimizer, Backtest <span style="font-weight:600;color:var(--dim);">(giờ máy)</span></div>
         <div style="font-size:10px;font-weight:700;color:var(--grn);background:rgba(22,163,74,.08);border:1px solid var(--grn);border-radius:6px;padding:3px 10px;flex-shrink:0;">${subBoxOpen.chk?'▲ Ẩn':'▼ Hiện'}</div>
       </div>
       ${subBoxOpen.chk?`
@@ -1351,7 +1489,7 @@ function renderUtility(){
           <div style="display:flex;gap:3px;">${[7,10,14,21].map(p=>`<button onclick="setChkPeriod(${p})" style="padding:6px 9px;border-radius:6px;cursor:pointer;font:700 11px/1 'JetBrains Mono',monospace;background:${indChk.period===p?'rgba(79,70,229,.1)':'var(--bg0)'};border:1.5px solid ${indChk.period===p?'var(--acc)':'var(--b2)'};color:${indChk.period===p?'var(--acc)':'var(--dim)'};">${p}</button>`).join('')}</div></div>
         <div><div style="font-size:9px;color:var(--acc);font-weight:700;letter-spacing:1px;margin-bottom:3px;">ENTRY TF *</div>
           <input value="${esc(indChk.entryTf)}" placeholder="vd: 1h" onchange="indChk.entryTf=this.value.trim();renderUtility()" style="width:70px;text-align:center;font-family:'JetBrains Mono',monospace;font-size:12px;"></div>
-        ${['macd','cmf','obv'].map(k=>{const gated=!((indChk.entryTf||'').trim());return `<div><div style="font-size:9px;color:${gated?'var(--b3)':'var(--dim)'};letter-spacing:1px;margin-bottom:3px;">${k.toUpperCase()} TF</div><input value="${esc(indChk[k])}" placeholder="vd: 2h" ${gated?'disabled':''} onchange="indChk['${k}']=this.value.trim()" style="width:70px;text-align:center;font-family:'JetBrains Mono',monospace;font-size:12px;${gated?'background:var(--bg2);color:var(--b3);cursor:not-allowed;':''}"></div>`;}).join('')}
+        ${['macd','cmf','obv','adx'].map(k=>{const gated=!((indChk.entryTf||'').trim());return `<div><div style="font-size:9px;color:${gated?'var(--b3)':'var(--dim)'};letter-spacing:1px;margin-bottom:3px;">${k.toUpperCase()} TF</div><input value="${esc(indChk[k])}" placeholder="vd: 2h" ${gated?'disabled':''} onchange="indChk['${k}']=this.value.trim()" style="width:70px;text-align:center;font-family:'JetBrains Mono',monospace;font-size:12px;${gated?'background:var(--bg2);color:var(--b3);cursor:not-allowed;':''}"></div>`;}).join('')}
         <div>
           <button onclick="runIndCheck()" style="padding:8px 18px;border-radius:8px;cursor:pointer;font:700 12px/1 'Outfit',sans-serif;background:${indChk.loading?'var(--bg2)':'rgba(22,163,74,.1)'};border:1.5px solid ${indChk.loading?'var(--b2)':'var(--grn)'};color:${indChk.loading?'var(--dim)':'var(--grn)'};">${indChk.loading?'⏳ Đang tải...':'🔍 CHECK'}</button>
         </div>
@@ -1522,6 +1660,17 @@ function bt_slopePass(data,idx,dir){
   const vI=data.hist[idx];
   return dir==='buy'?vI>vK:vI<vK;
 }
+// ★ BOX ĐỘC LẬP (ADX) — lọc trades theo ngưỡng ADX tại đúng TF btState.adxTf, không xét dấu +/-, không xét dir.
+// Dùng lại đúng bt_bsearchMacdIdx() có sẵn để căn đúng nến ADX đã ĐÓNG trước nến tín hiệu (t.rawTs). adxSet=null
+// (ADX tắt) → trả nguyên "trades". Xóa: xóa hàm này để gỡ, không ảnh hưởng bt_slopePass()/BT_IND_BOXES.
+function btAdxFilter(trades,adxSet,threshold){
+  if(!adxSet)return trades;
+  return trades.filter(t=>{
+    const idx=bt_bsearchMacdIdx(adxSet.opens,t.rawTs,adxSet.pMs);
+    const v=idx>=0?adxSet.hist[idx]:null;
+    return v!=null&&v>=threshold;
+  });
+}
 async function bt_fetchKlines(coin,startMs,endMs,tf){
   const key=`${coin}_${tf}_${startMs}_${endMs}`;
   if(_btCache[key])return _btCache[key];
@@ -1652,6 +1801,16 @@ async function bt_genMergedPositions(coin,dir,activeEntry,startMs,endMs){
       t.signalCandleTs=bt_bsearchTs(opens,t.rawTs+pMs,pMs)??t.rawTs;
       t.signalVal=bt_bsearchMacd(opens,hist,t.rawTs+pMs,pMs)??t.signalVal;
     }
+    // ★ BOX ĐỘC LẬP (ADX) — mirror đúng nhánh thường, áp trước cả bộ lọc MACD/CMF/OBV. Xóa: xóa khối
+    // "if(s.adxOn){...}" này để gỡ, không ảnh hưởng nhánh Gộp vị thế.
+    if(s.adxOn){
+      const adxPMs=BT_MACD_TF_MS[s.adxTf];
+      const adxC=await bt_fetchKlines(coin,startMs-BT_MACD_WARMUP*adxPMs,endMs,s.adxTf);
+      const adxCl=adxC.slice(0,-1);
+      const adxSet={opens:adxCl.map(c=>c[0]),hist:calcADX(adxCl.map(c=>+c[2]),adxCl.map(c=>+c[3]),adxCl.map(c=>+c[4]),14),pMs:adxPMs};
+      trades=btAdxFilter(trades,adxSet,s.adxThreshold);
+      for(const t of trades){ t.adxCandleTs=bt_bsearchTs(adxSet.opens,t.rawTs,adxSet.pMs); t.adxVal=bt_bsearchMacd(adxSet.opens,adxSet.hist,t.rawTs,adxSet.pMs); }
+    }
     // áp bộ lọc chỉ báo (MACD/CMF/OBV trade+trend) y hệt pipeline chính + gắn nến/giá trị chỉ báo lên từng trade ứng viên
     for(const box of activeIndBoxes){
       const bs=s[box.key];
@@ -1676,6 +1835,11 @@ async function bt_genMergedPositions(coin,dir,activeEntry,startMs,endMs){
     for(const t of trades){
       const indFields={};
       for(const box of activeIndBoxes) indFields[box.key]={candleTs:t[box.key+'CandleTs'],val:t[box.key+'Val'],tf:t[box.key+'Tf']};
+      // ★ BOX ĐỘC LẬP (ADX) — thêm key 'adx' vào indFields (không phải 1 box trong BT_IND_BOXES) — vòng for-in
+      // sẵn có ở nơi build "out" (gần bt_genMergedPositions, chỗ "for(const k in p.indFields)") sẽ tự sinh
+      // out.adxCandleTs/out.adxVal/out.adxTf mà không cần sửa gì thêm ở đó. Xóa: xóa dòng dưới để gỡ riêng phần
+      // hiển thị ADX ở nhánh Gộp vị thế, không ảnh hưởng việc lọc ADX ở trên.
+      if(s.adxOn) indFields.adx={candleTs:t.adxCandleTs,val:t.adxVal,tf:s.adxTf};
       events.push({ts:t.rawTs,price:t.entry,source:eb.label,tf:st.tf,
         signalCandleTs:t.signalCandleTs,signalVal:t.signalVal,indFields});
     }
@@ -1803,6 +1967,15 @@ const btState={
   // ô UI checkbox+input trong renderBacktest() + hàm bt_bsearchMacdIdx()/bt_slopePass() + phần
   // "&&bt_slopePass(...)" trong 6 filter của BT_IND_BOXES (đổi về đúng 1 dòng gốc) để gỡ sạch.
   slopeOn:false, slopeK:1,
+  // ★ BOX ĐỘC LẬP (ADX) — "cổng lọc" trend/sideway, KHÔNG xét dấu +/-, KHÔNG phụ thuộc 6 box MACD/CMF/OBV, tự tải
+  // tự tính TF riêng. Bật thì chỉ giữ trades có ADX (tại adxTf) ≥ adxThreshold, áp dụng NGAY SAU khi sinh tín hiệu
+  // thô, TRƯỚC vòng lặp BT_IND_BOXES — vẫn hoạt động dù tắt hết MACD/CMF/OBV. Khác Optimizer: đúng 1 TF/1 ngưỡng
+  // (không multi-select) vì Backtest Detail chỉ kiểm tra lại 1 config cụ thể. Tắt (adxOn=false, mặc định) →
+  // không tải nến, không lọc gì, y hệt hành vi gốc. Xóa: xóa 3 field "adxOn/adxTf/adxThreshold" này + hàm
+  // btAdxFilter() + khối tải nến ADX/áp filter trong runBacktest() (2 chỗ: nhánh thường + bt_genMergedPositions)
+  // + phần đọc/ghi "adxOn/adxTf/adxThreshold" trong btStateFromConfig()/saveBtConfig() + box UI trong
+  // renderBacktest() để gỡ sạch, không ảnh hưởng slope filter hay 6 box MACD/CMF/OBV.
+  adxOn:false, adxTf:'1d', adxThreshold:25,
   // ★ BOX ĐỘC LẬP con (Giới hạn Entry mới) — 0=không giới hạn (mặc định, y hệt hành vi gốc). N>0 = tối đa N lần Entry mới/vị thế.
   // Để gỡ: xóa field này + đoạn check "mergeMaxEntries>0&&entryMoiCount>=mergeMaxEntries" trong bt_genMergedPositions()
   // + ô input UI trong toggle-row + 2 dòng save/load JSON (mergeMaxEntries) trong saveBtConfig()/btStateFromConfig().
@@ -1883,6 +2056,8 @@ function saveBtConfig(){
     // ★ BOX ĐỘC LẬP (Độ dốc filter) — chỉ xuất khi đang BẬT (giống khuôn DCA), tắt thì không có 2 field này trong
     // JSON, giữ tương thích ngược file cũ. Xóa: xóa dòng "...(btState.slopeOn?...)" này để gỡ, không ảnh hưởng gì khác.
     ...(btState.slopeOn?{slopeOn:true,slopeK:btState.slopeK}:{}),
+    // ★ BOX ĐỘC LẬP (ADX) — chỉ xuất khi đang BẬT, giống khuôn slope. Xóa: xóa dòng dưới để gỡ.
+    ...(btState.adxOn?{adxOn:true,adxTf:btState.adxTf,adxThreshold:btState.adxThreshold}:{}),
   };
   const name=(prompt('Tên config:',btState.coin+'_'+btState.dir)||'').trim();
   if(!name)return;
@@ -1940,6 +2115,10 @@ function btStateFromConfig(cfg){
   // về giữ nguyên slopeOn/slopeK đang có trên UI khi load file, không tự đổi theo file nữa.
   btState.slopeOn=cfg.slopeOn===true;
   btState.slopeK=cfg.slopeK||1;
+  // ★ BOX ĐỘC LẬP (ADX) — mirror đúng cách slope filter tự bật/tắt theo file. Xóa: xóa 3 dòng dưới để gỡ.
+  btState.adxOn=cfg.adxOn===true;
+  btState.adxTf=cfg.adxTf||'1d';
+  btState.adxThreshold=cfg.adxThreshold??25;
 }
 function btCfgCard(c,i){
   const dirLbl=c.dir==='buy'?'Buy':c.dir==='sell'?'Sell':'Both';
@@ -1961,6 +2140,10 @@ function btCfgCard(c,i){
     const gc=b.group==='trade'?'var(--cyn)':'var(--grn)';
     return `<span style="font-size:11px;background:${grp};color:${gc};border-radius:5px;padding:2px 7px;white-space:nowrap">${short}·${c[b.key]}</span>`;
   }).join('');
+  // ★ BOX ĐỘC LẬP (ADX) — badge riêng, chỉ hiện khi file JSON có field "adxOn:true" (đọc thẳng, không tính lại
+  // gì) — để xác nhận trực quan file vừa upload có bật ADX hay không. Xóa: xóa dòng "adxBadge" này + "${adxBadge}"
+  // trong template bên dưới để gỡ riêng, không ảnh hưởng indBadges/slope hay bất kỳ badge nào khác.
+  const adxBadge=c.adxOn===true?`<span style="font-size:11px;background:rgba(192,38,211,.15);color:#c026d3;border-radius:5px;padding:2px 7px;white-space:nowrap">ADX·${(c.adxTf||'?').toUpperCase()}≥${c.adxThreshold??'?'}</span>`:'';
   const dateStr=c.start||c.end?`<span style="font-size:11px;color:var(--dim);margin-left:auto;white-space:nowrap">${c.start||'?'}→${c.end||'?'}</span>`:'';
   return `<div class="bt-cfg-item ${checked?'':'bt-off'}"
     style="flex-direction:column;align-items:flex-start;gap:5px;padding:9px 13px;cursor:pointer"
@@ -1972,6 +2155,7 @@ function btCfgCard(c,i){
       <span style="font-size:12px;font-weight:700;color:${dirC};flex-shrink:0">${dirLbl}</span>
       <span style="font-size:11px;background:rgba(139,92,246,.15);color:#a78bfa;border-radius:5px;padding:2px 7px;flex-shrink:0">${sigBadge}</span>
       ${indBadges}
+      ${adxBadge}
       ${dateStr}
     </div>
     <div style="display:flex;align-items:center;gap:9px;padding-left:18px;flex-wrap:wrap;min-width:0">
@@ -2086,6 +2270,20 @@ async function runBacktest(){
           for(const t of trades){
             t.signalCandleTs=bt_bsearchTs(opens,t.rawTs+pMs,pMs)??t.rawTs;
             t.signalVal=bt_bsearchMacd(opens,hist,t.rawTs+pMs,pMs)??t.signalVal;
+          }
+          // ★ BOX ĐỘC LẬP (ADX) — lọc NGAY TẠI ĐÂY (trước cả BT_IND_BOXES), tự tải nến riêng theo btState.adxTf.
+          // Tắt (adxOn=false) → bỏ qua hoàn toàn, không tải gì. Xóa: xóa khối "if(btState.adxOn){...}" này để gỡ.
+          if(btState.adxOn){
+            const adxPMs=BT_MACD_TF_MS[btState.adxTf];
+            btSetStatus(`⏳ ${coin} · ADX ${btState.adxTf}...`);
+            const adxC=await bt_fetchKlines(coin,startMs-BT_MACD_WARMUP*adxPMs,endMs,btState.adxTf);
+            const adxCl=adxC.slice(0,-1);
+            const adxSet={opens:adxCl.map(c=>c[0]),hist:calcADX(adxCl.map(c=>+c[2]),adxCl.map(c=>+c[3]),adxCl.map(c=>+c[4]),14),pMs:adxPMs};
+            trades=btAdxFilter(trades,adxSet,btState.adxThreshold);
+            // ★ BOX ĐỘC LẬP (ADX) — gắn nến đóng + giá trị lên từng trade để hiện cột "ADX" trong bảng kết quả,
+            // đối chiếu thủ công y hệt cột "Nến Signal"/6 box MACD/CMF/OBV. Xóa: xóa 2 dòng dưới để gỡ riêng phần
+            // hiển thị, không ảnh hưởng việc lọc ADX ở trên.
+            for(const t of trades){ t.adxCandleTs=bt_bsearchTs(adxSet.opens,t.rawTs,adxSet.pMs); t.adxVal=bt_bsearchMacd(adxSet.opens,adxSet.hist,t.rawTs,adxSet.pMs); t.adxTf=btState.adxTf; }
           }
           // apply ind box filters
           for(const box of BT_IND_BOXES){
@@ -2242,6 +2440,8 @@ function btLossModalHtml(){
 function _indBodyBg(b){return b.group==='trade'?'rgba(8,145,178,.07)':'rgba(22,163,74,.07)';}
 function _indHdrBg(b){return b.group==='trade'?'#e9f4f8':'#e9f5ed';}
 const _SIG_BODY_BG='rgba(79,70,229,.06)', _SIG_HDR_BG='#eeecfb', _COL_DIV='border-left:2px solid rgba(15,23,42,.10);';
+// ★ BOX ĐỘC LẬP (ADX) — màu riêng cho cột ADX trong bảng kết quả, tách biệt "Nến Signal"/6 box MACD/CMF/OBV.
+const _ADX_BODY_BG='rgba(192,38,211,.06)', _ADX_HDR_BG='#f7e9fb';
 function btResultsHtml(){
   const s=btState;
   if(!s.results.length&&!s.running){btView=null;return'';}
@@ -2249,6 +2449,9 @@ function btResultsHtml(){
   const _usedInd=new Set();
   s.results.forEach(t=>BT_IND_BOXES.forEach(b=>{if(t[b.key+'Tf']!=null)_usedInd.add(b.key);}));
   const activeInd=BT_IND_BOXES.filter(b=>_usedInd.has(b.key));
+  // ★ BOX ĐỘC LẬP (ADX) — cột riêng "ADX", hợp giống activeInd (chỉ hiện nếu có ít nhất 1 dòng kết quả có dữ
+  // liệu ADX). Xóa: xóa dòng "hasAdx" này + phần dùng nó trong indColHdrs/indSubHdrs/btRowHtml() để gỡ.
+  const hasAdx=s.results.some(t=>t.adxCandleTs!=null||t.adxVal!=null);
   const sorted=[...s.results].sort((a,b)=>{
     const ka=s.sortBy==='exit'?(a.exitTs||9e15):a.rawTs;
     const kb=s.sortBy==='exit'?(b.exitTs||9e15):b.rawTs;
@@ -2276,7 +2479,10 @@ function btResultsHtml(){
   // lưu view cho virtual scroll (thân bảng dựng động khi cuộn)
   // ★ BOX ĐỘC LẬP (Gộp vị thế DCA) — +3 cột (DCA1/DCA2/Giá TB) chỉ khi s.mergePositionOn bật, totalCols cộng thêm riêng cho box này.
   // ★ BOX ĐỘC LẬP (Giá thoát) — +1 cột LUÔN LUÔN hiện (không phụ thuộc mergePositionOn) → +1 cố định vào totalCols. Xóa cột này ở đây + trong <thead> + trong btRowHtml() để gỡ.
-  btView={sorted,activeInd,rowH:30,headerH:60,totalCols:15+2*activeInd.length+(s.mergePositionOn?3:0)+(s.mergePositionOn?2:0),_measured:false,dcaOn:s.mergePositionOn}; // +2 cột "Số nấc"/Chi tiết (★ Gộp vị thế) CHỈ cộng khi bật. dcaOn ở đây chỉ dùng nội bộ cho btRenderRows() đo chiều cao, không liên quan tách box.
+  // ★ BOX ĐỘC LẬP (ADX) — +2 cột (Nến đóng/Giá trị) CHỈ cộng khi hasAdx true, truyền hasAdx qua btView để
+  // btRenderRows()/btRowHtml() biết có vẽ 2 <td> ADX hay không. Xóa: xóa "(hasAdx?2:0)" trong totalCols + "hasAdx"
+  // trong object này để gỡ.
+  btView={sorted,activeInd,hasAdx,rowH:30,headerH:60,totalCols:15+2*activeInd.length+(hasAdx?2:0)+(s.mergePositionOn?3:0)+(s.mergePositionOn?2:0),_measured:false,dcaOn:s.mergePositionOn}; // +2 cột "Số nấc"/Chi tiết (★ Gộp vị thế) CHỈ cộng khi bật. dcaOn ở đây chỉ dùng nội bộ cho btRenderRows() đo chiều cao, không liên quan tách box.
   const nc=netPnlPct>=0?'var(--grn)':'var(--red)';
   const tnc=totalNet>=0?'var(--grn)':'var(--red)';
   const wrc=wr>=55?'var(--grn)':wr>=50?'var(--ora)':'var(--red)';
@@ -2307,9 +2513,12 @@ function btResultsHtml(){
     +'<th rowspan="2" style="color:var(--cyn)">Giá thoát</th>' // ★ BOX ĐỘC LẬP (Giá thoát) — luôn hiện, nằm bên phải "Giá TB" (khi bật DCA) hoặc bên phải "Giá vào" (khi tắt DCA). Xóa th này + cột trong btRowHtml() + bớt "+1" ở totalCols để gỡ.
     +(s.mergePositionOn?'<th rowspan="2">Số nấc</th><th rowspan="2"></th>':'') // ★ BOX ĐỘC LẬP (Gộp vị thế) — CHỈ hiện khi mergePositionOn bật, tắt thì bảng về đúng gốc 100%. Xóa 2 th này + 2 td tương ứng trong btRowHtml() + bỏ "+2" ở totalCols để gỡ.
     +'<th colspan="2" style="text-align:center;font-size:9px;color:var(--acc);background:'+_SIG_HDR_BG+';'+_COL_DIV+'">Nến Signal</th>'
+    +(hasAdx?'<th colspan="2" style="text-align:center;font-size:9px;color:#c026d3;background:'+_ADX_HDR_BG+';'+_COL_DIV+'">ADX</th>':'') // ★ BOX ĐỘC LẬP (ADX) — cột riêng, ngay cạnh "Nến Signal". Xóa dòng này + phần liên quan hasAdx để gỡ.
     +indColHdrs
     +'<th rowspan="2" class="bt-fz bt-r1">PnL%</th><th rowspan="2" class="bt-fz bt-r2">Net USDT</th><th rowspan="2" class="bt-fz bt-r3">KQ</th>'
-    +'</tr><tr><th style="background:'+_SIG_HDR_BG+';'+_COL_DIV+'">Nến đóng</th><th style="background:'+_SIG_HDR_BG+'">Giá trị</th>'+indSubHdrs+'</tr>'
+    +'</tr><tr><th style="background:'+_SIG_HDR_BG+';'+_COL_DIV+'">Nến đóng</th><th style="background:'+_SIG_HDR_BG+'">Giá trị</th>'
+    +(hasAdx?'<th style="background:'+_ADX_HDR_BG+';'+_COL_DIV+'">Nến đóng</th><th style="background:'+_ADX_HDR_BG+'">Giá trị</th>':'')
+    +indSubHdrs+'</tr>'
     +'</thead>'
     +'<tbody id="btTbody"></tbody>'
     +'</table></div></div></div>'
@@ -2318,7 +2527,7 @@ function btResultsHtml(){
 }
 
 // ─── 1 dòng kết quả (idx = chỉ số thật trong mảng đã sort) ───
-function btRowHtml(t,idx,activeInd){
+function btRowHtml(t,idx,activeInd,hasAdx){
   const isOpen=t.result==='OPEN';
   const fzBg=isOpen?'#fffbeb':(idx%2===1?'#f6f7f9':'#fff');
   const rowBg=isOpen?'background:#fffbeb;':(idx%2===1?'background:rgba(243,244,246,.7);':'');
@@ -2364,6 +2573,14 @@ function btRowHtml(t,idx,activeInd){
       :'')
     +'<td style="background:'+_SIG_BODY_BG+';'+_COL_DIV+'color:var(--dim)">'+btLocalTime(t.signalCandleTs)+'</td>'
     +'<td style="background:'+_SIG_BODY_BG+';color:var(--cyn)">'+sigValFmt+'</td>'
+    // ★ BOX ĐỘC LẬP (ADX) — 2 <td> riêng, ngay cạnh "Nến Signal". t.adxCandleTs/t.adxVal null (dòng từ config
+    // không bật ADX) → hiện "—" giống cách indCells xử lý khi box không bật. Xóa: xóa khối "(hasAdx?...:'')" này
+    // để gỡ riêng phần hiển thị, không ảnh hưởng indCells/cột Nến Signal.
+    +(hasAdx?(()=>{
+      const av=t.adxVal!=null?Number(t.adxVal).toFixed(2):'—';
+      return '<td style="background:'+_ADX_BODY_BG+';'+_COL_DIV+'color:var(--dim)">'+(t.adxTf?'<span style="color:#c026d3;font-weight:700">'+String(t.adxTf).toUpperCase()+'</span> · ':'')+(t.adxCandleTs?btLocalTime(t.adxCandleTs):'—')+'</td>'
+        +'<td style="background:'+_ADX_BODY_BG+';color:#c026d3;font-weight:700">'+av+'</td>';
+    })():'')
     +indCells
     +'<td class="bt-fz bt-r1" style="background:'+fzBg+';color:'+pnlC+';font-weight:700">'+(t.pnl!=null?(t.pnl>0?'+':'')+t.pnl.toFixed(2)+'%':'—')+'</td>'
     +'<td class="bt-fz bt-r2" style="background:'+fzBg+';color:'+pnlC+';font-weight:700">'+(t.netUsdt!=null?(t.netUsdt>0?'+':'')+'\$'+Math.abs(t.netUsdt).toFixed(2):'—')+'</td>'
@@ -2522,7 +2739,7 @@ function btRenderRows(){
   const cont=sec.querySelector('.bt-tbl-frozen');
   const tb=sec.querySelector('#btTbody');
   if(!cont||!tb)return;
-  const {sorted,activeInd,headerH,totalCols}=btView;
+  const {sorted,activeInd,hasAdx,headerH,totalCols}=btView;
   const rowH=btView.rowH;
   const N=sorted.length;
   if(!N){tb.innerHTML='<tr><td colspan="'+totalCols+'" style="text-align:center;padding:20px;color:var(--dim)">Chưa có lệnh</td></tr>';return;}
@@ -2533,7 +2750,7 @@ function btRenderRows(){
   const topH=start*rowH, botH=(N-end)*rowH;
   let html='';
   if(topH>0) html+='<tr aria-hidden="true"><td colspan="'+totalCols+'" style="padding:0;border:0;height:'+topH+'px"></td></tr>';
-  for(let k=start;k<end;k++) html+=btRowHtml(sorted[k],k,activeInd);
+  for(let k=start;k<end;k++) html+=btRowHtml(sorted[k],k,activeInd,hasAdx);
   if(botH>0) html+='<tr aria-hidden="true"><td colspan="'+totalCols+'" style="padding:0;border:0;height:'+botH+'px"></td></tr>';
   tb.innerHTML=html;
   // đo chiều cao thật 1 lần rồi vẽ lại cho khớp (tránh lệch khi cuộn sâu)
@@ -2628,6 +2845,16 @@ function renderBacktest(){
         </div>
         <div class="bt-tfs">${eb.tfs.map(tf=>`<button class="bt-tf ${st.tf===tf?'on':''}" onclick="btToggleBoxTf('${eb.key}','${tf}')">${tf}</button>`).join('')}</div>
       </div>`;}).join('')}</div>
+    <!-- ★ BOX ĐỘC LẬP (ADX) — "cổng lọc" trend/sideway độc lập, không áp cho box nào, tự tải/tự tính TF riêng.
+    Đặt TRƯỚC box "Độ dốc filter" vì flow thực tế: ADX gate chạy NGAY sau tín hiệu entry thô, trước cả slope/6 box
+    MACD/CMF/OBV (xem runBacktest(): ADX lọc trades trước BT_IND_BOXES loop). Xóa: xóa div này để gỡ riêng phần UI
+    (field/hàm xóa riêng theo chỉ dẫn ở btState/btAdxFilter). -->
+    <div style="display:flex;align-items:center;gap:8px;background:rgba(192,38,211,.05);border:1px solid #c026d3;border-radius:8px;padding:6px 10px;margin-bottom:8px;">
+      <button onclick="btState.adxOn=!btState.adxOn;renderBacktest()" style="padding:4px 10px;border-radius:6px;cursor:pointer;font:700 10px/1 'Outfit',sans-serif;background:${s.adxOn?'rgba(192,38,211,.1)':'var(--bg0)'};border:1px solid ${s.adxOn?'#c026d3':'var(--b2)'};color:${s.adxOn?'#c026d3':'var(--dim)'};">${s.adxOn?'✓ Bật':'⬜ Tắt'}</button>
+      <span style="font-size:10px;font-weight:700;color:${s.adxOn?'#c026d3':'var(--dim)'};">ADX filter (tải tính TF riêng độc lập, không liên quan Filter)</span>
+      ${s.adxOn?`<span style="font-size:9px;color:var(--dim);margin-left:auto;">TF</span><input value="${esc(s.adxTf)}" placeholder="vd: 1d" onchange="btState.adxTf=this.value.trim()" style="width:50px;text-align:center;background:var(--bg0);border:1.5px solid #c026d3;border-radius:6px;color:#c026d3;padding:3px;font-size:11px;font-weight:800;outline:none;font-family:'JetBrains Mono',monospace;"><span style="font-size:9px;color:var(--dim);">ngưỡng≥</span><input type="number" min="1" max="100" value="${s.adxThreshold}" oninput="btState.adxThreshold=parseFloat(this.value)||25" style="width:44px;text-align:center;background:var(--bg0);border:1.5px solid #c026d3;border-radius:6px;color:#c026d3;padding:3px;font-size:11px;font-weight:800;outline:none;font-family:'JetBrains Mono',monospace;">`:''}
+    </div>
+
     <!-- ★ BOX ĐỘC LẬP (Độ dốc filter) — bật thì áp thêm cho CẢ 6 filter MACD/CMF/OBV (trade+trend) bên dưới.
     Xóa: xóa div này để gỡ riêng phần UI (field/hàm xóa riêng theo chỉ dẫn ở btState/bt_slopePass). -->
     <div style="display:flex;align-items:center;gap:8px;background:rgba(79,70,229,.05);border:1px solid var(--acc);border-radius:8px;padding:6px 10px;margin-bottom:8px;">
@@ -2635,6 +2862,7 @@ function renderBacktest(){
       <span style="font-size:10px;font-weight:700;color:${s.slopeOn?'var(--acc)':'var(--dim)'};">Tính độ dốc filter (áp cho cả MACD/CMF/OBV)</span>
       ${s.slopeOn?`<span style="font-size:9px;color:var(--dim);margin-left:auto;">so với</span><input type="number" min="1" max="10" value="${s.slopeK}" oninput="btState.slopeK=parseInt(this.value)||1" style="width:40px;text-align:center;background:var(--bg0);border:1.5px solid var(--acc);border-radius:6px;color:var(--acc);padding:3px;font-size:11px;font-weight:800;outline:none;font-family:'JetBrains Mono',monospace;"><span style="font-size:9px;color:var(--dim);">nến trước</span>`:''}
     </div>
+
     <div class="bt-sec-lbl">Bộ lọc Trade (AND · thuận chiều)</div>
     <div class="bt-ind-rows">${BT_IND_BOXES.filter(b=>b.group==='trade').map(b=>{const bs=s[b.key];const on=bs.on;return `
       <div class="bt-ind-row ${on?b.colorClass:'bt-off'}">
@@ -2781,10 +3009,14 @@ function sim_cfgSummary(c){
     ? `DCA ✓ (${c.dca1Pct}%/${c.dca2Pct}% · size ${c.dca1SizePctOfEntry}%/${c.dca2SizePctOfEntry}%${c.mergeMaxEntries?' · tối đa '+c.mergeMaxEntries+' lần':''})`
     : 'DCA ✕';
   const slopeTxt = c.slopeOn===true ? `Dốc ✓ (k=${c.slopeK||1})` : 'Dốc ✕';
+  // ★ BOX ĐỘC LẬP (ADX) — hiển thị đúng khi file JSON có field "adxOn:true" (đọc thẳng, không tính lại gì), mirror
+  // y hệt cách slopeTxt ở trên hiển thị. Xóa: xóa dòng "adxTxt" này + phần "<span ...>${adxTxt}</span>" trong
+  // template bên dưới để gỡ riêng, không ảnh hưởng slopeTxt/dcaTxt/indTxt hay bất kỳ phần nào khác.
+  const adxTxt = c.adxOn===true ? `ADX ✓ (${(c.adxTf||'?').toUpperCase()}≥${c.adxThreshold??'?'})` : 'ADX ✕';
   const mo = c.maxOrders===0?'Multi':(c.maxOrders??1)+' lệnh';
   return `<div style="font-size:10px;color:var(--dim);padding:6px 8px;border-top:1px solid var(--b1);">
     <span style="color:var(--hi);font-weight:700;">${esc(c._name||'?')}</span> · ${esc(c.coin||'?')} · ${c.dir||'?'} · ${esc(entryTxt)} · TP${c.tp}/SL${c.sl} · ${mo}
-    <br>${esc(indTxt)} · <span style="color:${c.dca1Pct!=null?'var(--grn)':'var(--dim)'}">${dcaTxt}</span> · <span style="color:${c.slopeOn===true?'var(--acc)':'var(--dim)'}">${slopeTxt}</span>
+    <br>${esc(indTxt)} · <span style="color:${c.dca1Pct!=null?'var(--grn)':'var(--dim)'}">${dcaTxt}</span> · <span style="color:${c.slopeOn===true?'var(--acc)':'var(--dim)'}">${slopeTxt}</span> · <span style="color:${c.adxOn===true?'#c026d3':'var(--dim)'}">${adxTxt}</span>
   </div>`;
 }
 function sim_dayKey(ms){ return new Date(ms).toISOString().slice(0,10); }
@@ -3159,6 +3391,14 @@ let wfoState = {
   // ngoài minTrades/minWR. Xóa: xóa field này + ô input trong 1a + đổi 2 chỗ "wfoState.minNetPnl" trong wfo_run()
   // thành "0" (2 dòng "optState.minPnl=0;...minNetPnl=...") để gỡ, quay về không cho chỉnh Net PnL%≥.
   minNetPnl:0,
+  // ★ BOX ĐỘC LẬP (TP min/SL min) — bản mirror của bộ lọc "TP min%"/"SL min%" bên Optimizer (điều kiện
+  // "tp>=optState.minTp&&sl>=optState.minSl" có sẵn trong runOptimizer()), dùng lại đúng field optState.minTp/
+  // minSl, không viết công thức lọc mới. Đây là lọc theo GIÁ TRỊ THAM SỐ (loại thẳng tổ hợp có TP%/SL% thấp hơn
+  // ngưỡng), khác với minTrades/minWR/minNetPnl (lọc theo hiệu suất). Mặc định 0 = không lọc gì (y hệt hành vi
+  // trước khi có 2 field này). Xóa: xóa 2 field "minTp"/"minSl" này + 2 ô input trong 1a + đổi lại 2 chỗ
+  // "optState.minTp=wfoState.minTp||0;optState.minSl=wfoState.minSl||0;" trong wfo_run() thành
+  // "optState.minTp=0;optState.minSl=0;" (2 nơi: đoạn IS chính + đoạn deploy) để gỡ sạch.
+  minTp:0, minSl:0,
   // ★ Tính độ dốc filter (MACD/CMF/OBV) — KHÔNG build lại thuật toán, chỉ gọi luôn cờ đã có sẵn ở Optimizer
   // (optState.slopeOn/slopeKs) trong bước Optimize IS (WFO tự dò tổ hợp qua từng k, giống TP/SL/level), rồi truyền
   // đúng k thắng của mỗi đoạn xuống Backtest Detail (btState.slopeOn/slopeK, chỉ 1 số) ở bước Test OOS — luôn đồng
@@ -3168,6 +3408,16 @@ let wfoState = {
   // sạch, không ảnh hưởng gì tới Optimizer/Backtest Detail (2 cờ đó vẫn hoạt động độc lập bình thường ngoài lúc
   // chạy WFO).
   slopeOn:false, slopeKs:[1],
+  // ★ BOX ĐỘC LẬP (ADX) — KHÔNG build lại thuật toán tải/tính ADX, chỉ gọi luôn cờ đã có sẵn ở Optimizer
+  // (optState.adxOn/adxTfs/adxThresholds) trong bước Optimize IS (WFO tự dò tổ hợp qua từng TF/ngưỡng, giống
+  // TP/SL/level/slope), rồi truyền đúng TF/ngưỡng thắng của mỗi đoạn xuống Backtest Detail (btState.adxOn/adxTf/
+  // adxThreshold, chỉ 1 giá trị) ở bước Test OOS — luôn đồng thuận nhất quán IS→OOS, không tách riêng. Mặc định
+  // TẮT = hành vi y hệt cũ, không tải/tính gì thêm. Xóa: xóa 3 field "adxOn"/"adxTfs"/"adxThresholds" này + ô UI
+  // trong wfo_boxHtml() + 2 dòng "optState.adxOn=wfoState.adxOn;optState.adxTfs=...;optState.adxThresholds=..."
+  // (2 chỗ trong wfo_run()) + phần "...(w.adxTf!=null?{...}:{})" khi build cfg OOS (2 chỗ: OOS mỗi đoạn +
+  // wfo_exportLastConfig()) để gỡ sạch, không ảnh hưởng gì tới Optimizer/Backtest Detail (cờ đó vẫn hoạt động
+  // độc lập bình thường ngoài lúc chạy WFO).
+  adxOn:false, adxTfs:['1d'], adxThresholds:[25],
   // ★ Vốn dự kiến/Đòn bẩy/Size USD/lệnh — riêng của WFO Runner, KHÔNG dùng ké btState còn sót từ box khác nữa
   // (trước đây ovSizeUsd/ovLeverage để rỗng nên netUsdt bị tính theo đòn bẩy ẩn ngẫu nhiên — đã sửa ở wfo_run()).
   // Dùng "capital" để quy đổi Max Drawdown USDT ở mục 4 ra %. Xóa: xóa 3 field này + input tương ứng trong 1a +
@@ -3239,6 +3489,33 @@ function wfo_dmy(ms){ const d=new Date(ms); return pad(d.getUTCDate())+'/'+pad(d
 // ─── Chọn winner sau IS — modul con độc lập, chỉ đọc lại optState.results (không sửa runOptimizer()) ───
 // wfo_netPnl: đúng công thức 'netpnl' sẵn có của Optimizer (b.pnl-b.trades*feeRate), dùng lại không viết công thức phí mới.
 function wfo_netPnl(r){ return r.pnl-r.trades*feeRate; }
+// ★ BOX ĐỘC LẬP (K-Ratio) — đo độ "thẳng/đều" của đường vốn IS bằng hồi quy tuyến tính, KHÔNG liên quan
+// wfo_plateauScore()/wfo_pickWinner() bên dưới (2 hàm đó không đổi 1 dòng nào). x = thứ tự lệnh (1..n, không
+// dùng mốc thời gian tuyệt đối để tránh bị méo bởi khoảng nghỉ dài không có tín hiệu), y = PnL% (đã trừ fee)
+// cộng dồn theo thứ tự đó. K-Ratio = độ dốc hồi quy / sai số chuẩn của độ dốc — dương và càng lớn = đường vốn đi
+// lên càng đều, không lệ thuộc vài lệnh outlier. Trả về null nếu n<10 (mẫu quá nhỏ để hồi quy đáng tin, coi như
+// "chưa đủ dữ liệu để chấm"). Xóa: xóa hàm này để gỡ, không ảnh hưởng gì khác (chỉ có 1 chỗ gọi ở runOptimizer(),
+// xem chỉ dẫn xóa ở đó).
+function wfo_kRatio(trades){
+  const closed=trades.filter(t=>t.result!=='OPEN');
+  const n=closed.length;
+  if(n<10)return null;
+  let cum=0; const ys=closed.map(t=>{cum+=(t.pnl||0)-feeRate;return cum;});
+  const xs=ys.map((_,i)=>i+1);
+  const xBar=xs.reduce((a,b)=>a+b,0)/n, yBar=ys.reduce((a,b)=>a+b,0)/n;
+  let sxy=0,sxx=0;
+  for(let i=0;i<n;i++){ sxy+=(xs[i]-xBar)*(ys[i]-yBar); sxx+=(xs[i]-xBar)*(xs[i]-xBar); }
+  if(sxx===0)return null;
+  const b=sxy/sxx, a=yBar-b*xBar;
+  let sse=0;
+  for(let i=0;i<n;i++){ const resid=ys[i]-(a+b*xs[i]); sse+=resid*resid; }
+  if(n<=2)return null;
+  const seB=Math.sqrt((sse/(n-2))/sxx);
+  // ★ K-Ratio bản gốc Kestner 1996: chia thêm cho √n để phạt thêm mẫu ít lệnh (ngoài phần seB đã tự phạt qua sxx).
+  // Xóa "*Math.sqrt(n)" ở dòng return để quay về t-statistic thô của độ dốc (không phạt thêm theo n).
+  if(seB===0)return b>0?Infinity:(b<0?-Infinity:0);
+  return b/(seB*Math.sqrt(n));
+}
 // wfo_plateauScore: điểm "vùng cao nguyên" của 1 ứng viên — trung bình netPnl của chính nó + các dòng LÂN CẬN
 // (cùng period/dir/entrySignal/entryTf/tổ hợp filter TF, TP/SL lệch đúng 1 bậc liền kề trong lưới OPT_TP/OPT_SL).
 function wfo_plateauScore(results,candidate){
@@ -3264,6 +3541,18 @@ function wfo_plateauScore(results,candidate){
 function wfo_pickWinner(results){
   if(!results.length)return null;
   const sorted=[...results].sort((a,b)=>wfo_netPnl(b)-wfo_netPnl(a));
+  // ★ BOX ĐỘC LẬP (K-Ratio làm phương án chọn winner độc lập) — 'kratio' = phương án thứ 3, ngang hàng và LOẠI TRỪ
+  // với 'plateau'/'top1'. Sắp results theo kRatio giảm dần (bỏ qua ứng viên kRatio=null — chưa đủ 10 lệnh để
+  // chấm, xem wfo_kRatio()), lấy #1. Nếu KHÔNG ứng viên nào có kRatio hợp lệ (toàn null) thì rơi về "sorted" (đã
+  // sắp theo netPnl) để không làm treo/hỏng đoạn đó. Xóa: xóa khối "if(wfoState.selectMethod==='kratio'){...}"
+  // này + đổi nút chọn 3 phương án trong wfo_boxHtml() về lại 2 nút (plateau/top1) để gỡ, không ảnh hưởng
+  // 'plateau'/'top1' bên dưới. (field "kRatio" vẫn được runOptimizer() tính sẵn cho mọi kết quả — xem wfo_kRatio(),
+  // không phụ thuộc field này, nên không cần đụng runOptimizer() khi gỡ riêng phương án chọn winner này.)
+  if(wfoState.selectMethod==='kratio'){
+    const byK=[...results].filter(r=>r.kRatio!=null).sort((a,b)=>b.kRatio-a.kRatio);
+    const w=byK.length?byK[0]:sorted[0];
+    return {winner:w, rawRank:sorted.indexOf(w)+1, rawTotal:sorted.length, plateauScore:wfo_netPnl(w), rawScore:wfo_netPnl(w)};
+  }
   if(wfoState.selectMethod!=='plateau'){
     return {winner:sorted[0], rawRank:1, rawTotal:sorted.length, plateauScore:wfo_netPnl(sorted[0]), rawScore:wfo_netPnl(sorted[0])};
   }
@@ -3345,12 +3634,15 @@ async function wfo_run(){
       optState.coin=wfoState.coin;
       optState.start=wfo_dmy(seg.isStart); optState.end=wfo_dmy(seg.isEnd);
       optState.minTrades=wfoState.minTrades; optState.minWR=wfoState.minWR;
-      optState.minPnl=0; optState.minTp=0; optState.minSl=0; optState.minNetPnl=wfoState.minNetPnl||0;
+      optState.minPnl=0; optState.minTp=wfoState.minTp||0; optState.minSl=wfoState.minSl||0; optState.minNetPnl=wfoState.minNetPnl||0;
       // ★ Sort theo 'netpnl' (đã có sẵn trong Optimizer, đúng công thức b.pnl-b.trades*feeRate — không viết thêm logic
       // tính fee mới) để bước CHỌN winner mỗi đoạn khớp với bước ĐÁNH GIÁ 4 công thức ổn định (đều dùng net pnl sau
       // phí). Xóa: đổi lại thành 'pnl' để quay về sort theo pnl thô như trước, không ảnh hưởng gì khác.
       optState.consecLossOn=false; optState.maxOrders=wfoState.maxOrders; optState.sortBy='netpnl';
       optState.slopeOn=wfoState.slopeOn; optState.slopeKs=[...wfoState.slopeKs];
+      // ★ BOX ĐỘC LẬP (ADX) — mirror y hệt cách slope filter mirror ở trên, dùng lại đúng thuật toán tải/tính ADX
+      // sẵn có ở runOptimizer(), không viết lại gì. Xóa: xóa dòng dưới để gỡ.
+      optState.adxOn=wfoState.adxOn; optState.adxTfs=[...wfoState.adxTfs]; optState.adxThresholds=[...wfoState.adxThresholds];
       ENTRY_BOXES.forEach(eb=>{ optState[eb.key].on=wfoState[eb.key].on; optState[eb.key].tf=wfoState[eb.key].tf; });
       INDICATOR_BOXES.forEach(b=>{ optState[b.key].on=wfoState[b.key].on; optState[b.key].tfs=[...wfoState[b.key].tfs]; });
       await runOptimizer();
@@ -3366,7 +3658,13 @@ async function wfo_run(){
         // lại khi dò slopeKs) xuống cfg để btStateFromConfig() (gọi bên trong runBacktest()) nạp đúng k, KHÔNG
         // dùng wfoState.slopeK cố định nữa. Xóa: xóa dòng "...(wfoState.slopeOn...)" này để gỡ, cfg trở lại không
         // có field slopeOn/slopeK (OOS sẽ không áp độ dốc, giống hành vi trước khi có box này).
-        ...(wfoState.slopeOn&&w.slopeK!=null?{slopeOn:true,slopeK:w.slopeK}:{})};
+        ...(wfoState.slopeOn&&w.slopeK!=null?{slopeOn:true,slopeK:w.slopeK}:{}),
+        // ★ BOX ĐỘC LẬP (ADX) — truyền ĐÚNG TF/ngưỡng thắng của tổ hợp IS này (w.adxTf/w.adxThreshold, do
+        // runOptimizer() lưu lại khi dò adxTfs×adxThresholds) xuống cfg để btStateFromConfig() nạp đúng, KHÔNG
+        // dùng wfoState.adxTfs/adxThresholds (đó là danh sách để DÒ, không phải giá trị thắng). Xóa: xóa dòng
+        // "...(wfoState.adxOn...)" này để gỡ, cfg trở lại không có field adxOn/adxTf/adxThreshold (OOS sẽ không
+        // áp ADX, giống hành vi trước khi có box này).
+        ...(wfoState.adxOn&&w.adxTf!=null?{adxOn:true,adxTf:w.adxTf,adxThreshold:w.adxThreshold}:{})};
       INDICATOR_BOXES.forEach(b=>{ const v=w[b.key+'Tf']; if(v&&v!=='none')cfg[b.key]=v; });
       wfoState.statusMsg=`Test OOS mù (${wfo_dmy(seg.oosStart)} → ${wfo_dmy(seg.oosEnd)})`;
       wfo_updateProgressDom(i,segs.length,wfoState.statusMsg);
@@ -3405,9 +3703,10 @@ async function wfo_run(){
       optState.coin=wfoState.coin;
       optState.start=wfo_dmy(deploySeg.isStart); optState.end=wfo_dmy(deploySeg.isEnd);
       optState.minTrades=wfoState.minTrades; optState.minWR=wfoState.minWR;
-      optState.minPnl=0; optState.minTp=0; optState.minSl=0; optState.minNetPnl=wfoState.minNetPnl||0;
+      optState.minPnl=0; optState.minTp=wfoState.minTp||0; optState.minSl=wfoState.minSl||0; optState.minNetPnl=wfoState.minNetPnl||0;
       optState.consecLossOn=false; optState.maxOrders=wfoState.maxOrders; optState.sortBy='netpnl';
       optState.slopeOn=wfoState.slopeOn; optState.slopeKs=[...wfoState.slopeKs];
+      optState.adxOn=wfoState.adxOn; optState.adxTfs=[...wfoState.adxTfs]; optState.adxThresholds=[...wfoState.adxThresholds]; // ★ BOX ĐỘC LẬP (ADX) — mirror y hệt slope. Xóa dòng này để gỡ.
       ENTRY_BOXES.forEach(eb=>{ optState[eb.key].on=wfoState[eb.key].on; optState[eb.key].tf=wfoState[eb.key].tf; });
       INDICATOR_BOXES.forEach(b=>{ optState[b.key].on=wfoState[b.key].on; optState[b.key].tfs=[...wfoState[b.key].tfs]; });
       await runOptimizer();
@@ -3505,7 +3804,9 @@ function wfo_exportLastConfig(){
   const w=fc.winner;
   const cfg={coin:wfoState.coin,tp:w.tp,sl:w.sl,dir:w.dir,entrySignal:w.entrySignal,entryTf:w.entryTf,level:w.level,period:w.period,maxOrders:wfoState.maxOrders,
     // ★ BOX ĐỘC LẬP (Độ dốc filter) — xuất đúng k thắng của config deploy (w.slopeK). Xóa: xóa dòng này để gỡ.
-    ...(wfoState.slopeOn&&w.slopeK!=null?{slopeOn:true,slopeK:w.slopeK}:{})};
+    ...(wfoState.slopeOn&&w.slopeK!=null?{slopeOn:true,slopeK:w.slopeK}:{}),
+    // ★ BOX ĐỘC LẬP (ADX) — xuất đúng TF/ngưỡng thắng của config deploy (w.adxTf/w.adxThreshold). Xóa: xóa dòng này để gỡ.
+    ...(wfoState.adxOn&&w.adxTf!=null?{adxOn:true,adxTf:w.adxTf,adxThreshold:w.adxThreshold}:{})};
   INDICATOR_BOXES.forEach(b=>{ const v=w[b.key+'Tf']; if(v&&v!=='none')cfg[b.key]=v; });
   const blob=new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);
@@ -3524,6 +3825,14 @@ function wfo_entryBoxHtml(eb){
     ${on?`<div style="display:flex;gap:4px;flex-wrap:wrap;">${eb.tfs.map(tf=>`<button onclick="wfoState['${eb.key}'].tf='${tf}';renderUtility()" style="padding:4px 7px;border-radius:5px;cursor:pointer;font:700 10px/1 'JetBrains Mono',monospace;background:${st.tf===tf?'rgba(79,70,229,.1)':'var(--bg0)'};border:1px solid ${st.tf===tf?eb.color:'var(--b2)'};color:${st.tf===tf?eb.color:'var(--hi)'};">${tf.toUpperCase()}</button>`).join('')}</div>`:''}
   </div>`;
 }
+// ★ BOX ĐỘC LẬP (nút TRỐNG cho WFO) — mirror y hệt nút "TRỐNG" ở indBoxHtml() bên Optimizer (dòng ~1095): thêm 1
+// nút cuối cùng trong dãy TF của mỗi box (áp dụng chung cho cả "1c. FILTER TRADE" lẫn "1d. FILTER TREND", vì cả 2
+// dùng chung hàm wfo_indBoxHtml() này) cho phép tick "none" — tức đưa cả phương án KHÔNG dùng box đó vào tổ hợp để
+// Optimizer tự dò trong bước IS. wfo_toggleBoxTf()/runOptimizer() đã xử lý sẵn giá trị 'none' từ trước (dùng chung
+// engine với Optimizer, không phải build mới) — CHỈ THIẾU đúng 1 nút UI này. Xóa: xóa đoạn code nút "none" (biến
+// IIFE ngay sau .join('')} trong dòng return bên dưới, tính từ "${(()=>{const sel=b.tfs.includes('none')" tới hết
+// "})()}") để gỡ, WFO trở lại đúng như trước khi build (thiếu lựa chọn TRỐNG, chỉ chọn được TF thật) — không ảnh
+// hưởng gì tới các TF thật hay logic wfo_run()/runOptimizer().
 function wfo_indBoxHtml(box){
   const b=wfoState[box.key], on=b.on;
   return `<div style="background:var(--bg0);border:1.5px solid ${on?box.color:'var(--b2)'};border-radius:10px;padding:8px 10px;margin-bottom:6px;">
@@ -3531,7 +3840,7 @@ function wfo_indBoxHtml(box){
       <div style="font-size:10px;font-weight:700;color:${on?box.color:'var(--hi)'};">${box.label}</div>
       <button onclick="wfo_toggleBox('${box.key}')" style="padding:3px 9px;border-radius:6px;cursor:pointer;font:700 9px/1 'Outfit',sans-serif;background:${on?'rgba(79,70,229,.08)':'var(--bg0)'};border:1px solid ${on?box.color:'var(--b2)'};color:${on?box.color:'var(--hi)'};">${on?'✓ Bật':'⬜ Tắt'}</button>
     </div>
-    ${on?`<div style="display:flex;gap:4px;flex-wrap:wrap;">${box.tfs.map(tf=>{const sel=b.tfs.includes(tf);return `<button onclick="wfo_toggleBoxTf('${box.key}','${tf}')" style="padding:4px 7px;border-radius:5px;cursor:pointer;font:700 10px/1 'JetBrains Mono',monospace;background:${sel?'rgba(79,70,229,.08)':'var(--bg0)'};border:1px solid ${sel?box.color:'var(--b2)'};color:${sel?box.color:'var(--hi)'};">${sel?'☑':'☐'}${tf.toUpperCase()}</button>`;}).join('')}</div>`:''}
+    ${on?`<div style="display:flex;gap:4px;flex-wrap:wrap;">${box.tfs.map(tf=>{const sel=b.tfs.includes(tf);return `<button onclick="wfo_toggleBoxTf('${box.key}','${tf}')" style="padding:4px 7px;border-radius:5px;cursor:pointer;font:700 10px/1 'JetBrains Mono',monospace;background:${sel?'rgba(79,70,229,.08)':'var(--bg0)'};border:1px solid ${sel?box.color:'var(--b2)'};color:${sel?box.color:'var(--hi)'};">${sel?'☑':'☐'}${tf.toUpperCase()}</button>`;}).join('')}${(()=>{const sel=b.tfs.includes('none');return `<button onclick="wfo_toggleBoxTf('${box.key}','none')" title="Quet ca phuong an KHONG dung box nay (giong nut TRONG ben Optimizer)" style="padding:4px 7px;border-radius:5px;cursor:pointer;font:700 10px/1 'JetBrains Mono',monospace;background:${sel?'rgba(107,114,128,.14)':'var(--bg0)'};border:1px dashed ${sel?'var(--dim)':'var(--b2)'};color:${sel?'var(--txt)':'var(--dim)'};">${sel?'☑':'☐'} TRONG</button>`;})()}</div>`:''}
   </div>`;
 }
 function wfo_summaryEntry(){
@@ -3553,7 +3862,7 @@ function wfo_boxHtml(){
     <!-- ★ BOX ĐỘC LẬP (WFO Runner + Monte Carlo) — xem hướng dẫn gỡ đầy đủ ở comment phía trên "let wfoState". -->
     <div style="background:var(--bg1);border:1.5px solid var(--ora,#f59e0b);border-radius:12px;padding:14px;margin-top:14px;">
       <div onclick="subBoxOpen.wfo=!subBoxOpen.wfo;renderUtility()" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-bottom:${subBoxOpen.wfo?'10px':'0'};">
-        <div style="font-size:11px;font-weight:900;color:#f59e0b;letter-spacing:1px;">🧪 WFO RUNNER + MONTE CARLO — kiểm định giảm yếu tố may mắn</div>
+        <div style="font-size:11px;font-weight:900;color:#f59e0b;letter-spacing:1px;">🧪 WFO RUNNER + MONTE CARLO —dùng lại thuật toán Optimizer/ Backtest</div>
         <div style="display:flex;align-items:center;gap:8px;">
           <span style="font-size:10px;font-weight:700;color:#f59e0b;background:rgba(245,158,11,.1);border:1px solid #f59e0b;border-radius:6px;padding:3px 10px;">Box độc lập, xóa được</span>
           <div style="font-size:10px;font-weight:700;color:#f59e0b;background:rgba(245,158,11,.08);border:1px solid #f59e0b;border-radius:6px;padding:3px 10px;flex-shrink:0;">${subBoxOpen.wfo?'▲ Ẩn':'▼ Hiện'}</div>
@@ -3567,7 +3876,7 @@ function wfo_boxHtml(){
           <div style="font-size:10px;font-weight:700;color:var(--hi);letter-spacing:1px;">1a. COIN + SPAN + IS/OOS</div>
           <button onclick="wfoState.collapsed.span=!wfoState.collapsed.span;renderUtility()" style="font-size:9px;font-weight:700;color:var(--dim);background:none;border:1px solid var(--b2);border-radius:6px;padding:2px 8px;cursor:pointer;">${s.collapsed.span?'▼ Hiện':'▲ Ẩn'}</button>
         </div>
-        ${s.collapsed.span?`<div style="font-size:11px;color:var(--dim);">${esc(s.coin)} · ${esc(s.spanStart)} → ${s.spanEnd?esc(s.spanEnd):'hiện tại'} · IS ${s.isDays}ngày / OOS ${s.oosDays}ngày (bước=OOS) · vốn $${s.capital.toLocaleString()} · đòn bẩy ${s.leverage}x · size $${s.sizeUsd} · ${s.maxOrders===0?'Multi':s.maxOrders+' lệnh'} · ${s.selectMethod==='plateau'?'Vùng cao nguyên':'Lời nhất'}</div>`:`
+        ${s.collapsed.span?`<div style="font-size:11px;color:var(--dim);">${esc(s.coin)} · ${esc(s.spanStart)} → ${s.spanEnd?esc(s.spanEnd):'hiện tại'} · IS ${s.isDays}ngày / OOS ${s.oosDays}ngày (bước=OOS) · vốn $${s.capital.toLocaleString()} · đòn bẩy ${s.leverage}x · size $${s.sizeUsd} · ${s.maxOrders===0?'Multi':s.maxOrders+' lệnh'} · ${s.selectMethod==='plateau'?'Vùng cao nguyên':s.selectMethod==='kratio'?'K-Ratio cao nhất':'Lời nhất'}</div>`:`
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;">
           <div><div style="font-size:9px;color:var(--dim);margin-bottom:3px;">Coin</div><input value="${esc(s.coin)}" onchange="wfoState.coin=this.value.trim().toUpperCase()" style="font-family:'JetBrains Mono',monospace;font-size:12px;"></div>
           <div><div style="font-size:9px;color:var(--dim);margin-bottom:3px;">Từ (DD/MM/YYYY)</div><input value="${esc(s.spanStart)}" onchange="wfoState.spanStart=this.value.trim()" style="font-family:'JetBrains Mono',monospace;font-size:12px;"></div>
@@ -3585,6 +3894,11 @@ function wfo_boxHtml(){
           <div><div style="font-size:9px;color:var(--acc);font-weight:800;margin-bottom:3px;">★ Win rate tối thiểu % (bắt buộc)</div><input type="number" value="${s.minWR}" onchange="wfoState.minWR=parseFloat(this.value)||0" style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;width:100%;"></div>
           <div><div style="font-size:9px;color:var(--acc);font-weight:800;margin-bottom:3px;">★ Net PnL% ≥ (bắt buộc, mặc định 0)</div><input type="number" value="${s.minNetPnl}" onchange="wfoState.minNetPnl=parseFloat(this.value)||0" style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;width:100%;"></div>
         </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">
+          <div><div style="font-size:9px;color:var(--dim);margin-bottom:3px;">TP min % (lọc tham số, mặc định 0=không lọc)</div><input type="number" value="${s.minTp}" onchange="wfoState.minTp=parseFloat(this.value)||0" style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;width:100%;"></div>
+          <div><div style="font-size:9px;color:var(--dim);margin-bottom:3px;">SL min % (lọc tham số, mặc định 0=không lọc)</div><input type="number" value="${s.minSl}" onchange="wfoState.minSl=parseFloat(this.value)||0" style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;width:100%;"></div>
+        </div>
+        <!-- BOX DOC LAP (TP min/SL min cho WFO): 2 o nay CHI loc theo gia tri tham so TP%/SL% (giong Optimizer), khac voi 3 o "bat buoc" phia tren (loc theo hieu suat). Go: xoa div grid nay de go rieng UI, khong anh huong 3 o minTrades/minWR/minNetPnl. -->
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(100px,1fr));gap:8px;margin-top:8px;">
           <div><div style="font-size:9px;color:var(--dim);margin-bottom:3px;">Vốn dự kiến (USDT)</div><input type="number" value="${s.capital}" onchange="wfoState.capital=parseFloat(this.value)||1000" style="font-family:'JetBrains Mono',monospace;font-size:12px;"></div>
           <div><div style="font-size:9px;color:var(--dim);margin-bottom:3px;">Đòn bẩy</div><input type="number" value="${s.leverage}" onchange="wfoState.leverage=parseFloat(this.value)||1" style="font-family:'JetBrains Mono',monospace;font-size:12px;"></div>
@@ -3603,7 +3917,7 @@ function wfo_boxHtml(){
             <span onclick="wfoState.showPlateauInfo=true;renderUtility()" title="Xem giải thích Vùng cao nguyên" style="cursor:pointer;font-size:10px;font-weight:900;color:#f59e0b;border:1px solid #f59e0b;border-radius:50%;width:14px;height:14px;display:flex;align-items:center;justify-content:center;">i</span>
           </div>
           <div style="display:flex;gap:6px;">
-            ${[{val:'plateau',label:'🏔 Vùng cao nguyên (khuyến nghị)'},{val:'top1',label:'🎯 Lời nhất (top-1)'}].map(opt=>`<button onclick="wfoState.selectMethod='${opt.val}';renderUtility()" style="flex:1;padding:7px 6px;border-radius:7px;cursor:pointer;font:700 10px/1 'Outfit',sans-serif;background:${s.selectMethod===opt.val?'rgba(245,158,11,.1)':'var(--bg0)'};border:1.5px solid ${s.selectMethod===opt.val?'#f59e0b':'var(--b2)'};color:${s.selectMethod===opt.val?'#f59e0b':'var(--dim)'};">${opt.label}</button>`).join('')}
+            ${[{val:'plateau',label:'🏔 Vùng cao nguyên (khuyến nghị)'},{val:'top1',label:'🎯 Lời nhất (top-1)'},{val:'kratio',label:'📈 K-Ratio cao nhất'}].map(opt=>`<button onclick="wfoState.selectMethod='${opt.val}';renderUtility()" style="flex:1;padding:7px 6px;border-radius:7px;cursor:pointer;font:700 10px/1 'Outfit',sans-serif;background:${s.selectMethod===opt.val?'rgba(245,158,11,.1)':'var(--bg0)'};border:1.5px solid ${s.selectMethod===opt.val?'#f59e0b':'var(--b2)'};color:${s.selectMethod===opt.val?'#f59e0b':'var(--dim)'};">${opt.label}</button>`).join('')}
           </div>
         </div>
         <div style="font-size:10px;color:var(--dim);margin-top:8px;">→ dự kiến <b style="color:var(--hi)">${segs.length}</b> đoạn trượt</div>
@@ -3618,6 +3932,29 @@ function wfo_boxHtml(){
         </div>
         ${s.collapsed.entry?`<div style="font-size:11px;color:var(--dim);">${esc(wfo_summaryEntry())}</div>`:`<div style="display:flex;gap:8px;flex-wrap:wrap;">${ENTRY_BOXES.map(eb=>wfo_entryBoxHtml(eb)).join('')}</div>`}
       </div>
+
+      <!-- ★ BOX ĐỘC LẬP (ADX) — KHÔNG build lại thuật toán, chỉ gọi luôn cờ optState.adxOn/adxTfs/adxThresholds
+      (Optimizer tự dò tổ hợp qua từng TF/ngưỡng trong lúc Optimize IS) rồi truyền đúng TF/ngưỡng thắng xuống
+      btState.adxOn/adxTf/adxThreshold (Backtest Detail, chỉ 1 giá trị) ở bước Test OOS — đồng thuận IS→OOS.
+      Đặt TRƯỚC box "Độ dốc filter" vì flow thực tế: ADX gate chạy NGAY sau tín hiệu entry thô, trước cả slope/6 box
+      MACD/CMF/OBV (giống thứ tự trong Optimizer/Backtest Detail). Xóa: xóa div này (cả 2 khối) để gỡ riêng UI, xóa
+      field wfoState.adxOn/adxTfs/adxThresholds + 2 cặp dòng gán optState.adxOn/adxTfs/adxThresholds trong wfo_run()
+      + phần build cfg.adxOn/adxTf/adxThreshold từ w.adxTf/w.adxThreshold (2 chỗ: OOS + wfo_exportLastConfig()) +
+      cột "ADX IS" trong bảng danh sách config để gỡ sạch. -->
+      <div style="display:flex;align-items:center;gap:8px;background:rgba(192,38,211,.05);border:1px solid #c026d3;border-radius:8px;padding:6px 10px;margin-bottom:${s.adxOn?'0':'10px'};">
+        <button onclick="wfoState.adxOn=!wfoState.adxOn;renderUtility()" style="padding:4px 10px;border-radius:6px;cursor:pointer;font:700 10px/1 'Outfit',sans-serif;background:${s.adxOn?'rgba(192,38,211,.1)':'var(--bg0)'};border:1px solid ${s.adxOn?'#c026d3':'var(--b2)'};color:${s.adxOn?'#c026d3':'var(--dim)'};">${s.adxOn?'✓ Bật':'⬜ Tắt'}</button>
+        <span style="font-size:10px;font-weight:700;color:${s.adxOn?'#c026d3':'var(--dim)'};">ADX filter (tải tính TF riêng độc lập , đồng thuận IS+OOS)</span>
+      </div>
+      ${s.adxOn?`<div style="background:rgba(192,38,211,.05);border:1px solid #c026d3;border-top:none;border-radius:0 0 8px 8px;padding:6px 10px;margin-top:-4px;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px;">
+          <span style="font-size:9px;color:var(--dim);">TF ADX (tick nhiều để Optimizer tự dò tổ hợp mỗi đoạn IS):</span>
+          ${TRADE_TFS.map(tf=>`<button onclick="const i=wfoState.adxTfs.indexOf('${tf}');if(i>=0){if(wfoState.adxTfs.length>1)wfoState.adxTfs.splice(i,1);}else wfoState.adxTfs.push('${tf}');renderUtility()" style="padding:3px 8px;border-radius:5px;cursor:pointer;font:700 10px/1 'JetBrains Mono',monospace;background:${s.adxTfs.includes(tf)?'#c026d3':'var(--bg0)'};border:1px solid ${s.adxTfs.includes(tf)?'#c026d3':'var(--b2)'};color:${s.adxTfs.includes(tf)?'#fff':'var(--dim)'};">${tf.toUpperCase()}</button>`).join('')}
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <span style="font-size:9px;color:var(--dim);">Ngưỡng ADX≥ (tick nhiều để dò tổ hợp):</span>
+          ${[15,20,25,30,35,40].map(v=>`<button onclick="const i=wfoState.adxThresholds.indexOf(${v});if(i>=0){if(wfoState.adxThresholds.length>1)wfoState.adxThresholds.splice(i,1);}else wfoState.adxThresholds.push(${v});wfoState.adxThresholds.sort((a,b)=>a-b);renderUtility()" style="padding:3px 8px;border-radius:5px;cursor:pointer;font:700 10px/1 'JetBrains Mono',monospace;background:${s.adxThresholds.includes(v)?'#c026d3':'var(--bg0)'};border:1px solid ${s.adxThresholds.includes(v)?'#c026d3':'var(--b2)'};color:${s.adxThresholds.includes(v)?'#fff':'var(--dim)'};">${v}</button>`).join('')}
+        </div>
+      </div>`:''}
 
       <!-- ★ BOX ĐỘC LẬP (Độ dốc filter) — KHÔNG build lại thuật toán, chỉ gọi luôn cờ optState.slopeOn/slopeKs
       (Optimizer tự dò tổ hợp qua từng k trong lúc Optimize IS) rồi truyền đúng k thắng xuống btState.slopeOn/slopeK
@@ -3724,6 +4061,9 @@ function wfo_boxHtml(){
                 <!-- ★ BOX ĐỘC LẬP (Độ dốc filter) — cột "k IS" chỉ có ý nghĩa khi wfoState.slopeOn bật (Optimizer tự
                 dò k trong slopeKs mỗi đoạn IS). Tắt slopeOn → luôn hiện "-". Xóa: xóa th này + td tương ứng bên dưới. -->
                 <th style="padding:5px 7px;text-align:right;" title="Hệ số k (so với nến trước mấy bước) mà Optimizer chọn là tốt nhất cho đoạn IS này, trong số các k đã tick ở box Độ dốc filter">k IS</th>
+                <!-- ★ BOX ĐỘC LẬP (ADX) — cột "ADX IS" chỉ có ý nghĩa khi wfoState.adxOn bật. Tắt → luôn hiện "-".
+                Xóa: xóa th này + td tương ứng bên dưới. -->
+                <th style="padding:5px 7px;text-align:right;" title="TF/ngưỡng ADX mà Optimizer chọn là tốt nhất cho đoạn IS này, trong số các TF/ngưỡng đã tick ở box ADX filter">ADX IS</th>
                 <th style="padding:5px 7px;text-align:right;" title="Số lệnh của tổ hợp thắng khi chạy Optimize trên IS">Lệnh IS</th>
                 <th style="padding:5px 7px;text-align:right;" title="Net PnL% (đã trừ phí) của tổ hợp thắng, TRÊN CHÍNH đoạn IS đã tối ưu ra nó">Kết quả IS</th>
                 <th style="padding:5px 7px;text-align:right;">Lệnh OOS</th>
@@ -3741,6 +4081,7 @@ function wfo_boxHtml(){
                     <td style="padding:5px 7px;color:var(--dim);white-space:nowrap;">${wfo_dmy(seg.seg.isStart)}→${wfo_dmy(seg.seg.isEnd)} · <span style="color:var(--hi)">${wfo_dmy(seg.seg.oosStart)}→${wfo_dmy(seg.seg.oosEnd)}</span></td>
                     <td style="padding:5px 7px;color:var(--dim);">${w.entrySignal.toUpperCase()} ${w.entryTf} · ${w.dir} · Lv${w.level} · TP${w.tp}/SL${w.sl} · P${w.period} · ${esc(indTxt)}</td>
                     <td style="padding:5px 7px;text-align:right;color:${s.slopeOn?'var(--acc)':'var(--dim)'};font-weight:${s.slopeOn?'700':'400'};">${s.slopeOn&&w.slopeK!=null?w.slopeK:'-'}</td>
+                    <td style="padding:5px 7px;text-align:right;color:${s.adxOn?'#c026d3':'var(--dim)'};font-weight:${s.adxOn?'700':'400'};">${s.adxOn&&w.adxTf!=null?w.adxTf.toUpperCase()+' ≥'+w.adxThreshold:'-'}</td>
                     <td style="padding:5px 7px;text-align:right;color:var(--dim);">${w.trades}</td>
                     <td style="padding:5px 7px;text-align:right;color:var(--dim);">${seg.isPct>=0?'+':''}${seg.isPct.toFixed(1)}%</td>
                     <td style="padding:5px 7px;text-align:right;color:var(--hi);">${seg.trades}</td>
@@ -3799,10 +4140,12 @@ function wfo_plateauInfoModalHtml(){
   return `<div onclick="if(event.target===this){wfoState.showPlateauInfo=false;renderUtility();}" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;">
     <div style="background:var(--bg1);border:1px solid var(--b2);border-radius:14px;padding:18px;max-width:460px;max-height:82vh;overflow-y:auto;">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-        <div style="font-size:13px;font-weight:900;color:#f59e0b;">🏔 Cách tính Vùng cao nguyên</div>
+        <div style="font-size:13px;font-weight:900;color:#f59e0b;">🏔 Cách chọn winner (3 phương án)</div>
         <span onclick="wfoState.showPlateauInfo=false;renderUtility()" style="cursor:pointer;font-size:16px;color:var(--dim);padding:0 4px;">✕</span>
       </div>
       <div style="font-size:11px;color:var(--hi);line-height:1.6;">
+        <b style="color:#f59e0b;">🏔 Vùng cao nguyên</b>
+        <br><br>
         <b>Bước 1 — Sắp xếp:</b> lấy toàn bộ tổ hợp TP/SL/RSI đã thỏa "Số lệnh tối thiểu"/"Win rate tối thiểu"/"Net PnL%≥" trong IS, sắp theo Net PnL (đã trừ phí) từ cao xuống thấp.
         <br><br>
         <b>Bước 2 — Tìm hàng xóm:</b> với MỖI tổ hợp trong TOÀN BỘ danh sách (không cắt bớt theo % nào cả — bản thân phép tính hàng xóm ở bước sau đã tự loại đỉnh nhọn, không cần lọc trước), tìm các tổ hợp KHÁC có cùng RSI period/hướng lệnh/entry TF/filter TF, chỉ khác đúng TP hoặc SL lệch 1 bậc liền kề trong bảng giá trị (ví dụ TP=2.5 thì hàng xóm là TP=2 và TP=3).
@@ -3816,6 +4159,21 @@ function wfo_plateauInfoModalHtml(){
         <b>Vì sao khác "Lời nhất (top-1)":</b> top-1 chỉ nhìn đúng 1 con số của chính nó, dễ chọn nhầm "đỉnh nhọn" (số đẹp do ăn may, hàng xóm toàn xấu). Vùng cao nguyên ưu tiên tổ hợp mà xung quanh nó cũng tốt — ít nhạy cảm với sai số nhỏ, đáng tin hơn khi mang ra trade thật.
         <br><br>
         <span style="color:var(--dim);">Xem cột "Hạng gốc" trong bảng danh sách config (mục 3) để biết winner mỗi đoạn có trùng với "Lời nhất" (#1) hay không.</span>
+        <br><br>
+        <hr style="border:none;border-top:1px solid var(--b2);margin:10px 0;">
+        <b style="color:#c026d3;">📈 K-Ratio cao nhất</b>
+        <br><br>
+        <b>Bước 1 — Tính K-Ratio từng tổ hợp:</b> với mỗi tổ hợp trong IS, xếp các lệnh của nó theo thứ tự thời gian, cộng dồn PnL% (đã trừ phí) thành 1 "đường vốn", rồi hồi quy tuyến tính đường vốn đó để đo độ dốc và sai số của độ dốc (bước này chạy sẵn cho MỌI tổ hợp ngay khi Optimizer chạy xong, không đợi tới lúc bạn chọn phương án này).
+        <div style="background:var(--bg0);border-radius:8px;padding:8px 10px;margin:6px 0;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#c026d3;">
+          K-Ratio = độ dốc ÷ (sai số của độ dốc × √số lệnh)
+        </div>
+        Tổ hợp có dưới 10 lệnh trong IS: coi như chưa đủ dữ liệu để chấm điểm, tự động bị loại khỏi việc xét chọn.
+        <br><br>
+        <b>Bước 2 — Chọn winner:</b> trong số các tổ hợp còn lại (đã có K-Ratio hợp lệ), lấy tổ hợp có K-Ratio CAO NHẤT — tức đường vốn IS đi lên đều đặn nhất, ít lệ thuộc vào vài lệnh outlier ăn may, bất kể tổng NetPnL của nó cao hay chỉ trung bình.
+        <br><br>
+        <b>Vì sao khác cả "Lời nhất" lẫn "Vùng cao nguyên":</b> 2 phương án kia đều đo trên KHÔNG GIAN THAM SỐ (NetPnL của chính nó, hoặc trung bình với các tham số TP/SL lân cận) — không quan tâm chuỗi lệnh của 1 tổ hợp diễn ra đều hay dồn cục theo thời gian. K-Ratio đo ngược lại: đúng 1 tổ hợp đó, chuỗi lệnh của nó có "thẳng" theo thời gian hay không — bắt được kiểu lỗi "tổng lãi dương nhưng chỉ nhờ 1-2 lệnh cực lớn, phần còn lại đi ngang/lỗ" mà 2 phương án kia không phát hiện ra.
+        <br><br>
+        <span style="color:var(--dim);">Nguồn công thức: Lars N. Kestner, "Getting a Handle on True Performance", Futures, 1996; sửa lại bởi chính tác giả trong "(Re)Introducing the K-Ratio", SSRN, 2013.</span>
       </div>
     </div>
   </div>`;
