@@ -280,7 +280,7 @@ function optCfgObj(r){
     // JSON, giữ tương thích ngược file cũ. Dùng r.slopeK (k thắng của ĐÚNG tổ hợp này, lưu lúc runOptimizer() push
     // kết quả) — KHÔNG dùng optState.slopeK vì đó chỉ là biến tạm trong vòng lặp dò k, không phản ánh đúng tổ hợp
     // đang export. Xóa: xóa dòng "...(optState.slopeOn?...)" này để gỡ, không ảnh hưởng gì khác.
-    ...(optState.slopeOn?{slopeOn:true,slopeK:r.slopeK||1}:{}),
+    ...(optState.slopeOn?{slopeOn:true,slopeK:r.slopeK||1,slopeBoxKeys:[...optState.slopeBoxKeys]}:{}),
     // ★ BOX ĐỘC LẬP (ADX) — chỉ xuất khi đang BẬT, dùng r.adxTf/r.adxThreshold (TF/ngưỡng thắng của ĐÚNG tổ hợp
     // này, lưu lúc runOptimizer() push kết quả) — KHÔNG dùng optState.adxTfs/adxThresholds (đó là danh sách để
     // DÒ, không phải giá trị thắng). Xóa: xóa dòng "...(optState.adxOn?...)" này để gỡ, không ảnh hưởng gì khác.
@@ -581,8 +581,14 @@ function bsearchMacdIdx(opens,signalTs,periodMs){
 // optState.slopeK bước, cùng TF filter (idx tính bằng bsearchMacdIdx, cùng mảng data.hist). Tắt (slopeOn=false,
 // mặc định) → luôn trả true, không đổi hành vi cũ. Xóa: xóa hàm này để gỡ, đồng thời xóa phần dùng nó trong
 // 6 filter của INDICATOR_BOXES.
-function optSlopePass(data,idx,dir){
-  if(!optState.slopeOn)return true;
+// ★ BOX ĐỘC LẬP (Chọn lọc theo TỪNG filter — tham số boxKey) — thêm tham số "boxKey" + điều kiện
+// "!optState.slopeBoxKeys.includes(boxKey)" NGAY TRÊN dòng return cũ, KHÔNG đụng bất kỳ dòng tính k/hist nào bên
+// dưới. slopeOn vẫn là công tắc tổng (bật/tắt cả tính năng), slopeBoxKeys là danh sách filter CỤ THỂ được áp khi
+// slopeOn bật. Xóa: xóa tham số "boxKey" khỏi chữ ký hàm + xóa điều kiện "||!optState.slopeBoxKeys.includes(boxKey)"
+// (giữ lại "if(!optState.slopeOn)return true;" như cũ) + bỏ tham số boxKey ở 6 lời gọi trong INDICATOR_BOXES để gỡ,
+// quay về áp đồng loạt cho mọi filter đang bật như trước.
+function optSlopePass(data,idx,dir,boxKey){
+  if(!optState.slopeOn||!optState.slopeBoxKeys.includes(boxKey))return true;
   const k=Math.max(1,optState.slopeK|0);
   if(idx-k<0)return false;
   const vK=data.hist[idx-k];
@@ -701,7 +707,7 @@ const INDICATOR_BOXES = [
     filter: (trades,data,dir) => trades.filter(t=>{
       const idx=bsearchMacdIdx(data.opens,t.rawTs,data.pMs);
       const v=idx>=0?data.hist[idx]:null;
-      return v!==null&&(dir==='buy'?v>0:v<0)&&optSlopePass(data,idx,dir);
+      return v!==null&&(dir==='buy'?v>0:v<0)&&optSlopePass(data,idx,dir,'macdTrade');
     }),
   },
   {
@@ -712,7 +718,7 @@ const INDICATOR_BOXES = [
     filter: (trades,data,dir) => trades.filter(t=>{
       const idx=bsearchMacdIdx(data.opens,t.rawTs,data.pMs);
       const v=idx>=0?data.hist[idx]:null;
-      return v!==null&&(dir==='buy'?v>0:v<0)&&optSlopePass(data,idx,dir);
+      return v!==null&&(dir==='buy'?v>0:v<0)&&optSlopePass(data,idx,dir,'cmfTrade');
     }),
   },
   {
@@ -723,7 +729,7 @@ const INDICATOR_BOXES = [
     filter: (trades,data,dir) => trades.filter(t=>{
       const idx=bsearchMacdIdx(data.opens,t.rawTs,data.pMs);
       const v=idx>=0?data.hist[idx]:null;
-      return v!==null&&(dir==='buy'?v>0:v<0)&&optSlopePass(data,idx,dir);
+      return v!==null&&(dir==='buy'?v>0:v<0)&&optSlopePass(data,idx,dir,'obvTrade');
     }),
   },
   {
@@ -734,7 +740,7 @@ const INDICATOR_BOXES = [
     filter: (trades,data,dir) => trades.filter(t=>{
       const idx=bsearchMacdIdx(data.opens,t.rawTs,data.pMs);
       const v=idx>=0?data.hist[idx]:null;
-      return v!==null&&(dir==='buy'?v>0:v<0)&&optSlopePass(data,idx,dir);
+      return v!==null&&(dir==='buy'?v>0:v<0)&&optSlopePass(data,idx,dir,'macdTrend');
     }),
   },
   {
@@ -745,7 +751,7 @@ const INDICATOR_BOXES = [
     filter: (trades,data,dir) => trades.filter(t=>{
       const idx=bsearchMacdIdx(data.opens,t.rawTs,data.pMs);
       const v=idx>=0?data.hist[idx]:null;
-      return v!==null&&(dir==='buy'?v>0:v<0)&&optSlopePass(data,idx,dir);
+      return v!==null&&(dir==='buy'?v>0:v<0)&&optSlopePass(data,idx,dir,'cmfTrend');
     }),
   },
   {
@@ -756,7 +762,7 @@ const INDICATOR_BOXES = [
     filter: (trades,data,dir) => trades.filter(t=>{
       const idx=bsearchMacdIdx(data.opens,t.rawTs,data.pMs);
       const v=idx>=0?data.hist[idx]:null;
-      return v!==null&&(dir==='buy'?v>0:v<0)&&optSlopePass(data,idx,dir);
+      return v!==null&&(dir==='buy'?v>0:v<0)&&optSlopePass(data,idx,dir,'obvTrend');
     }),
   },
 ];
@@ -775,6 +781,11 @@ let optState = {
   // trong 6 filter của INDICATOR_BOXES (đổi về đúng 1 dòng "return v!==null&&(dir==='buy'?v>0:v<0);") để gỡ sạch.
   // slopeK ĐANG là biến TẠM (được gán lần lượt trong vòng lặp combo bên dưới) — danh sách k cần dò nằm ở slopeKs.
   slopeOn:false, slopeK:1, slopeKs:[1],
+  // ★ BOX ĐỘC LẬP (Chọn lọc theo TỪNG filter — slopeBoxKeys) — danh sách CỤ THỂ box nào được áp độ dốc khi slopeOn
+  // bật (mặc định đủ cả 6 = giữ đúng hành vi "áp cho cả MACD/CMF/OBV" như trước, tương thích ngược với thiết kế
+  // gốc). Xóa: xóa field "slopeBoxKeys" này + tham số boxKey trong optSlopePass()/6 lời gọi trong INDICATOR_BOXES +
+  // 6 nút tick trong renderOptimizer() để gỡ, quay về áp đồng loạt cho mọi filter đang bật.
+  slopeBoxKeys:['macdTrade','cmfTrade','obvTrade','macdTrend','cmfTrend','obvTrend'],
   // ★ BOX ĐỘC LẬP (ADX) — "cổng lọc" trend/sideway, KHÔNG xét dấu +/-, KHÔNG phụ thuộc 6 box MACD/CMF/OBV, tự tải
   // tự tính TF riêng. Bật thì chỉ cho tín hiệu entry đi tiếp nếu ADX (tại TF/ngưỡng đang dò) ≥ ngưỡng — áp dụng
   // NGAY SAU khi sinh tín hiệu thô (base=eb.generate(...)), TRƯỚC vòng lặp 6-box, nên vẫn hoạt động dù tắt hết
@@ -1034,6 +1045,8 @@ function optRowHtml(r,idx,activeCols){
         ?`<td style="color:#c026d3;font-weight:700">${r.adxTf.toUpperCase()}</td><td style="color:#c026d3;font-weight:700">≥${r.adxThreshold}</td>`
         :`<td style="color:var(--dim)">—</td><td style="color:var(--dim)">—</td>`
     ):'')
+    // ★ BOX ĐỘC LẬP (cột Dốc k bảng Optimizer) — 1 <td> này CHỈ render khi optState.slopeOn bật, đặt bên phải cột ADX. Chỉ hiển thị r.slopeK vốn đã có sẵn (do runOptimizer() lưu), KHÔNG đụng thuật toán dò k hay export. Xóa cả khối "+(optState.slopeOn?...)" này để gỡ, không ảnh hưởng cột nào khác.
+    +(optState.slopeOn?`<td style="color:var(--acc);font-weight:700">${r.slopeK||1}</td>`:'')
     +`<td><span onclick='saveOptConfig(${JSON.stringify(r).replace(/'/g,"\\'")})' style="font-size:11px;color:var(--grn);background:rgba(22,163,74,.08);border:1px solid var(--grn);border-radius:6px;padding:2px 7px;cursor:pointer;">💾</span></td>`
     +`</tr>`;
 }
@@ -1168,7 +1181,16 @@ function renderOptimizer(){
     ${o.slopeOn?`<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:rgba(79,70,229,.05);border:1px solid var(--acc);border-top:none;border-radius:0 0 8px 8px;padding:6px 10px;margin-top:-8px;margin-bottom:8px;">
       <span style="font-size:9px;color:var(--dim);">so với nến trước k bước (tick nhiều để dò tổ hợp):</span>
       ${[1,2,3,4,5,6,7,8,9,10].map(k=>`<button onclick="const i=optState.slopeKs.indexOf(${k});if(i>=0){if(optState.slopeKs.length>1)optState.slopeKs.splice(i,1);}else optState.slopeKs.push(${k});optState.slopeKs.sort((a,b)=>a-b);renderOptimizer()" style="padding:3px 8px;border-radius:5px;cursor:pointer;font:700 10px/1 'JetBrains Mono',monospace;background:${o.slopeKs.includes(k)?'var(--acc)':'var(--bg0)'};border:1px solid ${o.slopeKs.includes(k)?'var(--acc)':'var(--b2)'};color:${o.slopeKs.includes(k)?'#fff':'var(--dim)'};">${k}</button>`).join('')}
-    </div>`:''}
+    </div>
+    <!-- ★ BOX ĐỘC LẬP (Chọn lọc theo TỪNG filter — 6 nút tick) — chọn CỤ THỂ filter nào được áp độ dốc (mặc định
+    đủ cả 6, khớp hành vi cũ). Xóa: xóa div này để gỡ riêng phần chọn filter, quay về áp đồng loạt (giữ nguyên
+    slopeOn/slopeKs ở 2 div trên) — field/tham số boxKey xóa riêng theo chỉ dẫn ở optState/optSlopePass. -->
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:rgba(79,70,229,.05);border:1px solid var(--acc);border-top:none;border-radius:0 0 8px 8px;padding:6px 10px;margin-top:-8px;margin-bottom:8px;">
+      <span style="font-size:9px;color:var(--dim);">áp độ dốc cho filter nào (tick chọn):</span>
+      ${INDICATOR_BOXES.map(b=>`<button onclick="const i=optState.slopeBoxKeys.indexOf('${b.key}');i>=0?optState.slopeBoxKeys.splice(i,1):optState.slopeBoxKeys.push('${b.key}');renderOptimizer()" style="padding:3px 8px;border-radius:5px;cursor:pointer;font:700 10px/1 'JetBrains Mono',monospace;background:${o.slopeBoxKeys.includes(b.key)?'var(--acc)':'var(--bg0)'};border:1px solid ${o.slopeBoxKeys.includes(b.key)?'var(--acc)':'var(--b2)'};color:${o.slopeBoxKeys.includes(b.key)?'#fff':'var(--dim)'};">${b.label.replace(' · P20','').replace(' · EMA20','')}</button>`).join('')}
+    </div>
+    ${(()=>{const bad=o.slopeBoxKeys.filter(k=>!o[k].on);return bad.length?`<div style="font-size:10px;color:var(--red);margin:-4px 0 8px;">⚠ Đang chọn tính độ dốc cho ${bad.map(k=>INDICATOR_BOXES.find(b=>b.key===k).label).join(', ')} nhưng bộ lọc đó đang TẮT — không có tác dụng.</div>`:'';})()}
+    `:''}
 
     <div style="font-size:10px;color:var(--acc);font-weight:700;letter-spacing:1.5px;text-transform:uppercase;margin-bottom:6px;">🔵 BỘ LỌC TRADE (AND · thuận chiều)</div>
     ${INDICATOR_BOXES.filter(b=>b.group==='trade').map(b=>indBoxHtml(b)).join('')}
@@ -1275,10 +1297,11 @@ function renderOptimizer(){
           <th>#</th><th>Entry</th>
           ${INDICATOR_BOXES.filter(b=>o.activeBoxKeys.includes(b.key)).map(b=>`<th style="color:${b.color}">${b.label.replace(' · P20','').replace(' · EMA20','')}</th>`).join('')}
           <th>P</th><th>Dir</th><th>Lv</th><th>TP%</th><th>SL%</th><th>R:R</th>
-          <th>Lệnh</th><th>WIN</th><th>LOSS</th><th>WR%</th><th>PnL%</th><th>Net%</th>${o.adxOn?'<th style="color:#c026d3">ADX TF</th><th style="color:#c026d3">ADX ≥</th>':''}<th></th>
+          <th>Lệnh</th><th>WIN</th><th>LOSS</th><th>WR%</th><th>PnL%</th><th>Net%</th>${o.adxOn?'<th style="color:#c026d3">ADX TF</th><th style="color:#c026d3">ADX ≥</th>':''}${o.slopeOn?'<th style="color:var(--acc)">Dốc k</th>':''}<th></th>
         </tr></thead>
         <!-- BOX DOC LAP (cot ADX bang Optimizer): 2 th chi hien khi optState.adxOn bat. Go: bo phan dieu kien o.adxOn o thead nay, bo (o.adxOn?2:0) trong totalCols duoi day, va bo 2 td tuong ung trong optRowHtml(). Khong dung cot nao khac. -->
-        <tbody id="optTbody">${(()=>{const sorted=optFilteredResults();const activeCols=INDICATOR_BOXES.filter(b=>o.activeBoxKeys.includes(b.key));optView={sorted,activeCols,totalCols:15+activeCols.length+(o.adxOn?2:0),rowH:24,headerH:30,_measured:false};return '';})()}</tbody>
+        <!-- BOX DOC LAP (cot Doc k bang Optimizer): 1 th chi hien khi optState.slopeOn bat, dat ben phai cot ADX. Go: bo phan dieu kien o.slopeOn o thead nay, bo (o.slopeOn?1:0) trong totalCols duoi day, va bo 1 td tuong ung trong optRowHtml(). Khong dung cot nao khac, khong dung thuat toan do k hay export. -->
+        <tbody id="optTbody">${(()=>{const sorted=optFilteredResults();const activeCols=INDICATOR_BOXES.filter(b=>o.activeBoxKeys.includes(b.key));optView={sorted,activeCols,totalCols:15+activeCols.length+(o.adxOn?2:0)+(o.slopeOn?1:0),rowH:24,headerH:30,_measured:false};return '';})()}</tbody>
       </table></div>
     </div>
     `:(!o.running&&o.statusMsg.includes('✅')?`<div style="margin-top:12px;text-align:center;padding:20px;color:var(--dim);font-size:13px;">⚠ Không tìm thấy tổ hợp nào thỏa điều kiện.<br><span style="font-size:11px;">Thử giảm Win Rate mục tiêu hoặc số lệnh tối thiểu.</span></div>`:'')}
@@ -1651,8 +1674,12 @@ function bt_bsearchMacdIdx(opens,signalTs,periodMs){
 // ★ BOX ĐỘC LẬP (Độ dốc filter) — kiểm tra "đang tăng dần"(buy)/"đang giảm dần"(sell) so với nến lùi
 // btState.slopeK bước, cùng TF filter. Tắt (slopeOn=false, mặc định) → luôn true, không đổi hành vi cũ.
 // Xóa: xóa hàm này + phần dùng nó trong 6 filter của BT_IND_BOXES để gỡ.
-function bt_slopePass(data,idx,dir){
-  if(!btState.slopeOn)return true;
+// ★ BOX ĐỘC LẬP (Chọn lọc theo TỪNG filter — tham số boxKey) — mirror y hệt optSlopePass(), thêm tham số "boxKey"
+// + điều kiện "!btState.slopeBoxKeys.includes(boxKey)", KHÔNG đụng dòng tính k/hist nào bên dưới. Xóa: xóa tham số
+// "boxKey" khỏi chữ ký hàm + xóa điều kiện "||!btState.slopeBoxKeys.includes(boxKey)" + bỏ tham số boxKey ở 6 lời
+// gọi trong BT_IND_BOXES để gỡ, quay về áp đồng loạt như trước.
+function bt_slopePass(data,idx,dir,boxKey){
+  if(!btState.slopeOn||!btState.slopeBoxKeys.includes(boxKey))return true;
   const k=Math.max(1,btState.slopeK|0);
   if(idx-k<0)return false;
   const vK=data.hist[idx-k];
@@ -1736,31 +1763,40 @@ const BT_ENTRY_BOXES=[
 ];
 
 // ─── BT_IND_BOXES (1 array, group field phân biệt) ───
+// ★ BOX ĐỘC LẬP (Top coin theo vốn hóa — nút nạp nhanh Backtest Detail) — danh sách tĩnh 50 coin (thứ tự = rank
+// vốn hóa lúc lưu), dùng cho 3 nút "Top 10/20/50" cạnh ô nhập Coin. Xóa: xóa hằng số "BT_TOP_COINS" này + hàm
+// "btLoadTopCoins()" bên dưới + 3 nút trong renderBacktest() (đánh dấu cùng tên) để gỡ, không ảnh hưởng ô nhập
+// Coin/btParseCoins() hay bất kỳ phần nào khác.
+const BT_TOP_COINS=['BTCUSDT','ETHUSDT','BNBUSDT','XRPUSDT','SOLUSDT','TRXUSDT','DOGEUSDT','ADAUSDT','AVAXUSDT','SUIUSDT','LINKUSDT','TONUSDT','SHIBUSDT','XLMUSDT','DOTUSDT','HBARUSDT','BCHUSDT','UNIUSDT','PEPEUSDT','LTCUSDT','NEARUSDT','ICPUSDT','APTUSDT','VETUSDT','ENAUSDT','ARBUSDT','XMRUSDT','FETUSDT','FILUSDT','ALGOUSDT','CRVUSDT','ENSUSDT','IOTAUSDT','JUPUSDT','ARUSDT','HNTUSDT','BTTUSDT','AEROUSDT','ZECUSDT','MATICUSDT','FTMUSDT','RENDERUSDT','IMXUSDT','THETAUSDT','SNXUSDT'];
+function btLoadTopCoins(n){
+  btState.coin=BT_TOP_COINS.slice(0,n).join('\n');
+  renderBacktest();
+}
 const BT_IND_BOXES=[
   {key:'macdTrade',label:'MACD trade',group:'trade',color:'var(--cyn)',colorClass:'on-tr',tfs:BT_TRADE_TFS,defaultState:{on:false,tfs:['1d']},
    warmup:pMs=>BT_MACD_WARMUP*pMs,
    buildHist:c=>bt_calcMacdHist(c.map(x=>parseFloat(x[4]))),
-   filter:(trades,data,dir)=>trades.filter(t=>{const idx=bt_bsearchMacdIdx(data.opens,t.rawTs,data.pMs);const v=idx>=0?data.hist[idx]:null;return v!==null&&(dir==='buy'?v>0:v<0)&&bt_slopePass(data,idx,dir);})},
+   filter:(trades,data,dir)=>trades.filter(t=>{const idx=bt_bsearchMacdIdx(data.opens,t.rawTs,data.pMs);const v=idx>=0?data.hist[idx]:null;return v!==null&&(dir==='buy'?v>0:v<0)&&bt_slopePass(data,idx,dir,'macdTrade');})},
   {key:'cmfTrade',label:'CMF trade',group:'trade',color:'var(--cyn)',colorClass:'on-tr',tfs:BT_TRADE_TFS,defaultState:{on:false,tfs:['1d']},
    warmup:pMs=>BT_MACD_WARMUP*pMs,
    buildHist:c=>bt_calcCMF(c.map(x=>parseFloat(x[2])),c.map(x=>parseFloat(x[3])),c.map(x=>parseFloat(x[4])),c.map(x=>parseFloat(x[5])),20),
-   filter:(trades,data,dir)=>trades.filter(t=>{const idx=bt_bsearchMacdIdx(data.opens,t.rawTs,data.pMs);const v=idx>=0?data.hist[idx]:null;return v!==null&&(dir==='buy'?v>0:v<0)&&bt_slopePass(data,idx,dir);})},
+   filter:(trades,data,dir)=>trades.filter(t=>{const idx=bt_bsearchMacdIdx(data.opens,t.rawTs,data.pMs);const v=idx>=0?data.hist[idx]:null;return v!==null&&(dir==='buy'?v>0:v<0)&&bt_slopePass(data,idx,dir,'cmfTrade');})},
   {key:'obvTrade',label:'OBV trade',group:'trade',color:'var(--cyn)',colorClass:'on-tr',tfs:BT_TRADE_TFS,defaultState:{on:false,tfs:['1d']},
    warmup:pMs=>1000*pMs,
    buildHist:c=>bt_calcOBVdiff(c.map(x=>parseFloat(x[4])),c.map(x=>parseFloat(x[5])),20),
-   filter:(trades,data,dir)=>trades.filter(t=>{const idx=bt_bsearchMacdIdx(data.opens,t.rawTs,data.pMs);const v=idx>=0?data.hist[idx]:null;return v!==null&&(dir==='buy'?v>0:v<0)&&bt_slopePass(data,idx,dir);})},
+   filter:(trades,data,dir)=>trades.filter(t=>{const idx=bt_bsearchMacdIdx(data.opens,t.rawTs,data.pMs);const v=idx>=0?data.hist[idx]:null;return v!==null&&(dir==='buy'?v>0:v<0)&&bt_slopePass(data,idx,dir,'obvTrade');})},
   {key:'macdTrend',label:'MACD trend',group:'trend',color:'var(--grn)',colorClass:'on-trd',tfs:BT_TREND_TFS,defaultState:{on:false,tfs:['1d']},
    warmup:pMs=>BT_MACD_WARMUP*pMs,
    buildHist:c=>bt_calcMacdHist(c.map(x=>parseFloat(x[4]))),
-   filter:(trades,data,dir)=>trades.filter(t=>{const idx=bt_bsearchMacdIdx(data.opens,t.rawTs,data.pMs);const v=idx>=0?data.hist[idx]:null;return v!==null&&(dir==='buy'?v>0:v<0)&&bt_slopePass(data,idx,dir);})},
+   filter:(trades,data,dir)=>trades.filter(t=>{const idx=bt_bsearchMacdIdx(data.opens,t.rawTs,data.pMs);const v=idx>=0?data.hist[idx]:null;return v!==null&&(dir==='buy'?v>0:v<0)&&bt_slopePass(data,idx,dir,'macdTrend');})},
   {key:'cmfTrend',label:'CMF trend',group:'trend',color:'var(--grn)',colorClass:'on-trd',tfs:BT_TREND_TFS,defaultState:{on:false,tfs:['1d']},
    warmup:pMs=>BT_MACD_WARMUP*pMs,
    buildHist:c=>bt_calcCMF(c.map(x=>parseFloat(x[2])),c.map(x=>parseFloat(x[3])),c.map(x=>parseFloat(x[4])),c.map(x=>parseFloat(x[5])),20),
-   filter:(trades,data,dir)=>trades.filter(t=>{const idx=bt_bsearchMacdIdx(data.opens,t.rawTs,data.pMs);const v=idx>=0?data.hist[idx]:null;return v!==null&&(dir==='buy'?v>0:v<0)&&bt_slopePass(data,idx,dir);})},
+   filter:(trades,data,dir)=>trades.filter(t=>{const idx=bt_bsearchMacdIdx(data.opens,t.rawTs,data.pMs);const v=idx>=0?data.hist[idx]:null;return v!==null&&(dir==='buy'?v>0:v<0)&&bt_slopePass(data,idx,dir,'cmfTrend');})},
   {key:'obvTrend',label:'OBV trend',group:'trend',color:'var(--grn)',colorClass:'on-trd',tfs:BT_TREND_TFS,defaultState:{on:false,tfs:['1d']},
    warmup:pMs=>1000*pMs,
    buildHist:c=>bt_calcOBVdiff(c.map(x=>parseFloat(x[4])),c.map(x=>parseFloat(x[5])),20),
-   filter:(trades,data,dir)=>trades.filter(t=>{const idx=bt_bsearchMacdIdx(data.opens,t.rawTs,data.pMs);const v=idx>=0?data.hist[idx]:null;return v!==null&&(dir==='buy'?v>0:v<0)&&bt_slopePass(data,idx,dir);})},
+   filter:(trades,data,dir)=>trades.filter(t=>{const idx=bt_bsearchMacdIdx(data.opens,t.rawTs,data.pMs);const v=idx>=0?data.hist[idx]:null;return v!==null&&(dir==='buy'?v>0:v<0)&&bt_slopePass(data,idx,dir,'obvTrend');})},
 ];
 
 // ══════════════════════════════════════════════
@@ -1777,11 +1813,11 @@ const BT_IND_BOXES=[
 async function bt_genMergedPositions(coin,dir,activeEntry,startMs,endMs){
   const s=btState;
   const sizeUsd=s.sizeUsd||100;
-  // ★ Field DCA riêng của Gộp vị thế: mergeDca1Pct/mergeDca2Pct/mergeDca1SizePct/mergeDca2SizePct.
-  const dca1Pct=s.mergeDca1Pct||1.5, dca2Pct=s.mergeDca2Pct||3;
-  const dca1SizePct=s.mergeDca1SizePct||50, dca2SizePct=s.mergeDca2SizePct||50;
+  // ★ Field DCA riêng của Gộp vị thế: mergeDcaLevels (mảng % không giới hạn số nấc) + mergeDcaSizePct (size % áp đều mọi nấc).
+  const dcaLevelsPct=(Array.isArray(s.mergeDcaLevels)&&s.mergeDcaLevels.length?s.mergeDcaLevels:[1,1.5,2,2.5,3]).map(Number);
+  const dcaSizePct=s.mergeDcaSizePct||50;
   const tp=s.tp, sl=s.sl;
-  // ★ BOX ĐỘC LẬP con (Giới hạn Entry mới) — 0=không giới hạn.
+  // ★ BOX ĐỘC LẬP con (Giới hạn Entry mới) — 0=KHÔNG cho Entry mới (chỉ Entry gốc+DCA). N>0=tối đa N lần.
   const mergeMaxEntries=s.mergeMaxEntries||0;
 
   // 1) sinh sự kiện entry ứng viên từ TỪNG entry box đang bật — LUÔN dùng bt_genTrades gốc (không bt_genTradesDca),
@@ -1829,6 +1865,22 @@ async function bt_genMergedPositions(coin,dir,activeEntry,startMs,endMs){
           t[box.key+'CandleTs']=bt_bsearchTs(primaryData.opens,t.rawTs,primaryData.pMs);
           t[box.key+'Val']=bt_bsearchMacd(primaryData.opens,primaryData.hist,t.rawTs,primaryData.pMs);
           t[box.key+'Tf']=bs.tfs[0];
+          // ★ BOX ĐỘC LẬP (Dốc theo từng filter — bảng Backtest Detail) — mirror y hệt nhánh thường bên dưới
+          // (runBacktest() không-gộp-vị-thế). CHỈ tính khi s.slopeOn bật VÀ box.key nằm trong s.slopeBoxKeys (đồng
+          // bộ đúng với gating thật của bt_slopePass() — tránh hiển thị "Dốc" cho filter KHÔNG thực sự bị áp độ
+          // dốc). Xóa: xóa khối "if(s.slopeOn&&...){...}" này để gỡ riêng, không ảnh hưởng CandleTs/Val/Tf ở trên
+          // hay bt_slopePass().
+          if(s.slopeOn&&s.slopeBoxKeys.includes(box.key)){
+            const _si=bt_bsearchMacdIdx(primaryData.opens,t.rawTs,primaryData.pMs);
+            const _sk=_si-s.slopeK;
+            if(_sk>=0){
+              // FIX: dùng thẳng opens[_sk] (giờ MỞ, không +pMs) để KHỚP đúng quy ước cột "Nến đóng" gốc (CandleTs
+              // cũng lấy opens[idx] không +pMs) — trước đó lỡ +pMs khiến k=1 trùng giờ với CandleTs (giờ mở nến
+              // hiện tại = giờ đóng nến trước) dù giá trị khác nhau, gây hiểu lầm là cùng 1 nến.
+              t[box.key+'SlopeCandleTs']=primaryData.opens[_sk];
+              t[box.key+'SlopeVal']=primaryData.hist[_sk];
+            }
+          }
         }
       }
     }
@@ -1858,12 +1910,12 @@ async function bt_genMergedPositions(coin,dir,activeEntry,startMs,endMs){
   const eventsByTs=new Map();
   for(const e of events){ if(!eventsByTs.has(e.ts))eventsByTs.set(e.ts,[]); eventsByTs.get(e.ts).push(e); }
 
+  // ★ newDcaLadder — tổng quát N nấc (không còn cứng dca1Price/dca2Price). Mỗi nấc: {pct,price,filled}, khớp
+  // TUẦN TỰ theo đúng thứ tự mảng dcaLevelsPct (nấc sau chỉ xét khi nấc trước đã khớp — y hệt logic cascading cũ).
   function newDcaLadder(avgEntry){
-    return {
-      dca1Price: dir==='buy'?avgEntry*(1-dca1Pct/100):avgEntry*(1+dca1Pct/100),
-      dca2Price: dir==='buy'?avgEntry*(1-dca2Pct/100):avgEntry*(1+dca2Pct/100),
-      dca1Filled:false, dca2Filled:false,
-    };
+    return { ladder: dcaLevelsPct.map(pct=>({
+      pct, price: dir==='buy'?avgEntry*(1-pct/100):avgEntry*(1+pct/100), filled:false,
+    })) };
   }
   function recalcTpSl(avgEntry){
     return {
@@ -1890,15 +1942,16 @@ async function bt_genMergedPositions(coin,dir,activeEntry,startMs,endMs){
   function resetLadder(p){ Object.assign(p,newDcaLadder(p.avgEntry)); p.slArmed=false; }
   function finalize(p,result,exitTs,exitPrice){
     const pnl=result==='WIN'?tp:result==='LOSS'?-sl:null;
-    // dca1Hit/dca2Hit — CHỈ tính nấc DCA thuộc thang của Entry gốc (trước khi có "Entry mới" đầu tiên, nếu có) để giám sát đúng theo entry gốc
-    let dca1Hit=null, dca2Hit=null;
-    for(const l of p.legs){ if(l.type==='Entry mới')break; if(l.type==='DCA1')dca1Hit=l.price; if(l.type==='DCA2')dca2Hit=l.price; }
+    // ★ dcaHitCount — tổng quát: đếm số nấc DCA đã khớp (loại 'DCA') CHỈ thuộc thang HIỆN HÀNH (sau lần "Entry mới"
+    // gần nhất, nếu có) — thay cho dca1Hit/dca2Hit cứng cũ. Chi tiết từng nấc đã khớp xem ở popup "Chi tiết ›" (p.legs).
+    let dcaHitCount=0;
+    for(let i=p.legs.length-1;i>=0;i--){ const l=p.legs[i]; if(l.type==='Entry mới'||l.type==='Entry gốc')break; if(l.type&&l.type.indexOf('DCA')===0)dcaHitCount++; }
     const out={ coin,dir,entrySignal:p.entrySignal,entryTf:p.entryTf,
       rawTs:p.entryTs, exitTs:exitTs??null, exitPrice:exitPrice??null,
       entry:p.legs[0].price, avgEntry:parseFloat(p.avgEntry.toFixed(8)),
       totalSizeUsed:parseFloat(p.totalCost.toFixed(6)),
       legsCount:p.legs.length, legs:p.legs, entrySources:_mergeSourcesLabel(p.legs),
-      dca1Hit, dca2Hit,
+      dcaHitCount, dcaLevelsTotal:dcaLevelsPct.length,
       tp:p.tp, sl:p.slArmed?p.sl:null, result, pnl,
       signalCandleTs:p.signalCandleTs, signalVal:p.signalVal };
     if(p.indFields) for(const k in p.indFields){ out[k+'CandleTs']=p.indFields[k].candleTs; out[k+'Val']=p.indFields[k].val; out[k+'Tf']=p.indFields[k].tf; }
@@ -1915,11 +1968,17 @@ async function bt_genMergedPositions(coin,dir,activeEntry,startMs,endMs){
     if(pos){ const slHit=pos.slArmed&&(dir==='buy'?lo<=pos.sl:hi>=pos.sl);
       if(slHit){ closedTrades.push(finalize(pos,'LOSS',ts,pos.sl)); pos=null; } }
     if(pos){
-      if(!pos.dca1Filled&&(dir==='buy'?lo<=pos.dca1Price:hi>=pos.dca1Price)){
-        addLeg(pos,'DCA1',pos.dca1Price,sizeUsd*dca1SizePct/100,ts); pos.dca1Filled=true;
-      }
-      if(pos.dca1Filled&&!pos.dca2Filled&&(dir==='buy'?lo<=pos.dca2Price:hi>=pos.dca2Price)){
-        addLeg(pos,'DCA2',pos.dca2Price,sizeUsd*dca2SizePct/100,ts); pos.dca2Filled=true; pos.slArmed=true;
+      // ★ Khớp DCA tuần tự N nấc (tổng quát, thay 2 khối if cứng dca1Filled/dca2Filled cũ) — nấc [i] chỉ được xét
+      // khi mọi nấc [0..i-1] phía trước ĐÃ khớp (giữ đúng cascading: gần đến xa). Khớp xong nấc CUỐI CÙNG trong
+      // ladder → slArmed=true (nếu mergeMaxEntries=0, không có Entry mới nào để tắt lại → SL bật vĩnh viễn từ đây).
+      for(let i=0;i<pos.ladder.length;i++){
+        const lvl=pos.ladder[i];
+        if(lvl.filled)continue;
+        if(i>0&&!pos.ladder[i-1].filled)break; // nấc trước chưa khớp thì dừng, không xét nấc xa hơn
+        const hit=dir==='buy'?lo<=lvl.price:hi>=lvl.price;
+        if(!hit)break;
+        addLeg(pos,'DCA'+(i+1),lvl.price,sizeUsd*dcaSizePct/100,ts); lvl.filled=true;
+        if(i===pos.ladder.length-1) pos.slArmed=true;
       }
     }
     const evs=eventsByTs.get(ts);
@@ -1929,7 +1988,8 @@ async function bt_genMergedPositions(coin,dir,activeEntry,startMs,endMs){
         else{
           // ★ BOX ĐỘC LẬP con (Giới hạn Entry mới) — đã đủ mergeMaxEntries lần thì bỏ qua tín hiệu, giữ nguyên vị thế hiện tại.
           const entryMoiCount=pos.legs.filter(l=>l.type==='Entry mới').length;
-          if(mergeMaxEntries>0&&entryMoiCount>=mergeMaxEntries){ continue; }
+          // ★ mergeMaxEntries=0 → 0>=0 luôn đúng → bỏ qua Entry mới NGAY LẦN ĐẦU (chặn hẳn). N>0 → giới hạn N lần như cũ.
+          if(entryMoiCount>=mergeMaxEntries){ continue; }
           addLeg(pos,'Entry mới',e.price,sizeUsd,ts,e.source,e.tf); resetLadder(pos);
         }
       }
@@ -1955,18 +2015,25 @@ const btState={
   tp:2,sl:1,fee:0.1,dir:'buy',maxOrders:1,
   // ★ BOX ĐỘC LẬP — GỘP VỊ THẾ THEO COIN (Gộp vị thế DCA). mergePositionOn=false (mặc định) = hành vi y hệt gốc, không đụng bt_genTrades.
   // Bật thì: mọi tín hiệu (RSI/MFI) trên cùng coin+chiều gộp thành 1 vị thế duy nhất (thay vì chạy độc lập song song).
-  // KHÔNG lưu vào JSON export (chỉ là lựa chọn mô phỏng phía backtest UI, bot thật tự hiểu phải gộp khi thấy dca1Pct/dca2Pct trong config).
-  // 4 field mergeDca1Pct/mergeDca2Pct/mergeDca1SizePct/mergeDca2SizePct là RIÊNG của box này.
-  // Để gỡ sạch: xóa field mergePositionOn + 4 field mergeDca1Pct/mergeDca2Pct/mergeDca1SizePct/mergeDca2SizePct + hàm bt_genMergedPositions() + nhánh rẽ trong runBacktest() + toggle-row UI trong renderBacktest()
-  // + cột DCA1/DCA2/Giá TB (khối điều kiện "s.mergePositionOn?...") + cột "Số nấc"/nút "Xem chi tiết" + popup btMergeDetailModalHtml()/btMergeInfoModalHtml() trong btResultsHtml()/btRowHtml()/renderBacktest().
+  // KHÔNG lưu vào JSON export (chỉ là lựa chọn mô phỏng phía backtest UI, bot thật tự hiểu phải gộp khi thấy dcaLevels trong config).
+  // 2 field mergeDcaLevels (mảng %, không giới hạn số nấc)/mergeDcaSizePct (size % áp đều cho MỌI nấc) là RIÊNG của box này.
+  // Để gỡ sạch: xóa field mergePositionOn + 2 field mergeDcaLevels/mergeDcaSizePct + hàm bt_genMergedPositions() + nhánh rẽ trong runBacktest() + toggle-row UI trong renderBacktest()
+  // + cột "Số nấc"/nút "Xem chi tiết" + popup btMergeDetailModalHtml()/btMergeInfoModalHtml() trong btResultsHtml()/btRowHtml()/renderBacktest().
   mergePositionOn:false,
-  mergeDca1Pct:1.5, mergeDca2Pct:3, mergeDca1SizePct:50, mergeDca2SizePct:50,
+  // ★ mergeDcaLevels: mảng % lùi giá từ avgEntry hiện hành cho từng nấc DCA, khớp TUẦN TỰ (nấc sau chỉ xét khi nấc
+  // trước đã khớp). Mặc định 5 nấc [1,1.5,2,2.5,3] (mỗi nấc cách nhau 0.5%). Nút "+ Thêm DCA" trong UI tự thêm
+  // 1 phần tử = phần tử cuối + 0.5. mergeDcaSizePct = size % (của 1 entry đơn/sizeUsd) áp ĐỀU cho mọi nấc.
+  mergeDcaLevels:[1,1.5,2,2.5,3], mergeDcaSizePct:50,
   // ★ BOX ĐỘC LẬP (Độ dốc filter MACD/CMF/OBV) — bật thì cả 6 filter (trade+trend) yêu cầu thêm: giá trị tại
   // nến i phải "đang tăng dần" (buy) / "đang giảm dần" (sell) so với nến lùi slopeK bước, cùng TF filter đó —
   // không chỉ xét dấu +/- như trước. Mặc định TẮT = hành vi y hệt cũ. Xóa: xóa 2 field "slopeOn"/"slopeK" này +
   // ô UI checkbox+input trong renderBacktest() + hàm bt_bsearchMacdIdx()/bt_slopePass() + phần
   // "&&bt_slopePass(...)" trong 6 filter của BT_IND_BOXES (đổi về đúng 1 dòng gốc) để gỡ sạch.
   slopeOn:false, slopeK:1,
+  // ★ BOX ĐỘC LẬP (Chọn lọc theo TỪNG filter — slopeBoxKeys) — mirror y hệt optState.slopeBoxKeys. Mặc định đủ cả
+  // 6 (giữ đúng hành vi "áp cho cả MACD/CMF/OBV" cũ). Xóa: xóa field này + tham số boxKey trong bt_slopePass()/
+  // 6 lời gọi trong BT_IND_BOXES + 6 nút tick trong renderBacktest() để gỡ.
+  slopeBoxKeys:['macdTrade','cmfTrade','obvTrade','macdTrend','cmfTrend','obvTrend'],
   // ★ BOX ĐỘC LẬP (ADX) — "cổng lọc" trend/sideway, KHÔNG xét dấu +/-, KHÔNG phụ thuộc 6 box MACD/CMF/OBV, tự tải
   // tự tính TF riêng. Bật thì chỉ giữ trades có ADX (tại adxTf) ≥ adxThreshold, áp dụng NGAY SAU khi sinh tín hiệu
   // thô, TRƯỚC vòng lặp BT_IND_BOXES — vẫn hoạt động dù tắt hết MACD/CMF/OBV. Khác Optimizer: đúng 1 TF/1 ngưỡng
@@ -1976,8 +2043,11 @@ const btState={
   // + phần đọc/ghi "adxOn/adxTf/adxThreshold" trong btStateFromConfig()/saveBtConfig() + box UI trong
   // renderBacktest() để gỡ sạch, không ảnh hưởng slope filter hay 6 box MACD/CMF/OBV.
   adxOn:false, adxTf:'1d', adxThreshold:25,
-  // ★ BOX ĐỘC LẬP con (Giới hạn Entry mới) — 0=không giới hạn (mặc định, y hệt hành vi gốc). N>0 = tối đa N lần Entry mới/vị thế.
-  // Để gỡ: xóa field này + đoạn check "mergeMaxEntries>0&&entryMoiCount>=mergeMaxEntries" trong bt_genMergedPositions()
+  // ★ BOX ĐỘC LẬP con (Giới hạn Entry mới) — 0 = KHÔNG cho phép Entry mới (chỉ Entry gốc + toàn bộ nấc DCA, SL bật
+  // vĩnh viễn sau khi khớp đủ nấc DCA cuối vì không còn Entry mới nào để tắt lại). N>0 = tối đa N lần Entry mới/vị
+  // thế (không có ký hiệu "vô hạn" riêng — muốn nhiều thì nhập số lớn, ví dụ 100).
+  // Để gỡ: xóa field này + đoạn check "entryMoiCount>=mergeMaxEntries" trong bt_genMergedPositions() (trả lại
+  // "mergeMaxEntries>0&&entryMoiCount>=mergeMaxEntries" để quay về 0=vô hạn như cũ)
   // + ô input UI trong toggle-row + 2 dòng save/load JSON (mergeMaxEntries) trong saveBtConfig()/btStateFromConfig().
   mergeMaxEntries:0,
   configs:[],results:[],
@@ -2001,6 +2071,23 @@ function btParseDate(str){
   if(str.includes('-')){const[y,m,d]=str.split('-').map(Number);return Date.UTC(y,m-1,d);}
   const[d,m,y]=str.split('/').map(Number);return Date.UTC(y<100?2000+y:y,m-1,d);
 }
+// ★ BOX ĐỘC LẬP (Multi-coin Backtest Detail) — tách chuỗi btState.coin thành mảng coin, chấp nhận dấu phẩy/dấu
+// cách/tab/xuống dòng làm ký tự phân cách (mirror đúng cách bulkGenParseCoins() làm cho box "Tạo file hàng loạt",
+// chỉ khác là thêm dấu cách vào regex). Tự thêm hậu tố USDT nếu gõ tên trần. Chỉ dùng khi btState.mode==='manual'
+// (mode='load' vẫn giữ 1 coin lấy từ file config, không đổi). Xóa: xóa hàm này + chỗ gọi "btParseCoins(...)" trong
+// runBacktest() (đổi lại "const coin=btState.coin.trim().toUpperCase();") + ô nhập textarea trong renderBacktest()
+// (đổi lại input 1 dòng cũ) để gỡ, không ảnh hưởng bulkGenParseCoins() hay box nào khác.
+function btRenderCoinCount(){
+  const el=document.getElementById('btCoinCount');
+  if(el){const list=btParseCoins(btState.coin);el.textContent=list.length+' coin: '+(list.join(', ')||'—');}
+}
+function btParseCoins(text){
+  return (text||'')
+    .split(/[,\s]+/)
+    .map(s=>s.trim().toUpperCase())
+    .filter(Boolean)
+    .map(s=>s.endsWith('USDT')?s:s+'USDT');
+}
 function btToggleBox(key){btState[key].on=!btState[key].on;renderBacktest();}
 function btToggleBoxTf(key,tf){
   const isEntry=BT_ENTRY_BOXES.some(b=>b.key===key);
@@ -2012,11 +2099,13 @@ function setBtSort(by,dir){btState.sortBy=by;btState.sortDir=dir;renderBacktest(
 function setBtMode(m){btState.mode=m;renderBacktest();}
 function setBtDir(d){btState.dir=d;renderBacktest();}
 function setBtOrd(o){btState.maxOrders=o;renderBacktest();}
-function saveBtConfig(){
-  // ★ BOX ĐỘC LẬP (Multi-entry "both") — khi CẢ RSI VÀ MFI cùng bật, không thể gộp chung 1 bộ entryTf/period/level
-  // (2 loại có thể cấu hình khác nhau) → xuất entrySignal:"both" + tách riêng rsiTf/rsiPeriod/rsiLevel + mfiTf/mfiPeriod/mfiLevel.
-  // Chỉ bật 1 loại (trường hợp phổ biến/cũ) → GIỮ NGUYÊN format cũ (entrySignal/entryTf/period/level), không đổi gì.
-  // Để gỡ: xóa nhánh "activeEntries.length>1" này, quay lại luôn dùng activeEb đơn (BT_ENTRY_BOXES.find(...)||BT_ENTRY_BOXES[0]).
+// ★ BOX ĐỘC LẬP (btCfgObj — tách riêng phần build object JSON khỏi saveBtConfig() gốc) — cho phép truyền
+// coinOverride (dùng bởi "Save All .zip mỗi coin 1 file" ở bảng tóm tắt theo coin) mà KHÔNG đổi field/logic nào
+// khác so với saveBtConfig() cũ. Không truyền coinOverride → dùng đúng btState.coin như hành vi gốc. Xóa: gộp lại
+// nội dung hàm này thẳng vào trong saveBtConfig() (thay "coin:coinOverride??btState.coin" bằng "coin:btState.coin")
+// để gỡ, quay về saveBtConfig() độc lập như trước — không ảnh hưởng box "Save All .zip" (khi đó cũng cần xóa theo
+// chỉ dẫn riêng ở btSaveAllCoinConfigs()).
+function btCfgObj(coinOverride){
   const activeEntries=BT_ENTRY_BOXES.filter(eb=>btState[eb.key].on);
   const entryFields = activeEntries.length>1
     ? { entrySignal:'both', ...Object.fromEntries(activeEntries.flatMap(eb=>{
@@ -2025,8 +2114,8 @@ function saveBtConfig(){
       })) }
     : (()=>{ const activeEb=activeEntries[0]||BT_ENTRY_BOXES[0]; const st=btState[activeEb.key];
         return { entrySignal:activeEb.signal, entryTf:st.tf, period:st.period, level:st.level }; })();
-  const cfg={
-    coin:btState.coin,
+  return {
+    coin:coinOverride??btState.coin,
     dir:btState.dir,
     ...entryFields,
     tp:btState.tp,
@@ -2041,28 +2130,57 @@ function saveBtConfig(){
       const bs=btState[b.key];
       return [b.key,bs.on&&bs.tfs.length?bs.tfs.join(','):null];
     })),
-    // ★ BOX ĐỘC LẬP (Gộp vị thế DCA) — chỉ xuất 4 field này khi đang BẬT, để bot copy đúng cấu hình đang chạy.
-    // Tắt Gộp vị thế DCA → KHÔNG có 4 field này trong JSON (giữ nguyên format cũ, bot tự hiểu là lệnh đơn không DCA).
-    // Tên field JSON dùng "dca1Pct/dca2Pct/dca1SizePctOfEntry/dca2SizePctOfEntry" (định dạng chuẩn cho bot đọc),
-    // lấy giá trị từ state nội bộ mergeDca1Pct/mergeDca2Pct/mergeDca1SizePct/mergeDca2SizePct — không đổi tên biến trong code.
-    // Để gỡ: xóa khối "...(btState.mergePositionOn?{...}:{})" này, không ảnh hưởng field/case nào khác.
     ...(btState.mergePositionOn?{
-      dca1Pct:btState.mergeDca1Pct,
-      dca2Pct:btState.mergeDca2Pct,
-      dca1SizePctOfEntry:btState.mergeDca1SizePct,
-      dca2SizePctOfEntry:btState.mergeDca2SizePct,
+      dcaLevels:[...btState.mergeDcaLevels],
+      dcaSizePct:btState.mergeDcaSizePct,
       mergeMaxEntries:btState.mergeMaxEntries,
     }:{}),
-    // ★ BOX ĐỘC LẬP (Độ dốc filter) — chỉ xuất khi đang BẬT (giống khuôn DCA), tắt thì không có 2 field này trong
-    // JSON, giữ tương thích ngược file cũ. Xóa: xóa dòng "...(btState.slopeOn?...)" này để gỡ, không ảnh hưởng gì khác.
-    ...(btState.slopeOn?{slopeOn:true,slopeK:btState.slopeK}:{}),
-    // ★ BOX ĐỘC LẬP (ADX) — chỉ xuất khi đang BẬT, giống khuôn slope. Xóa: xóa dòng dưới để gỡ.
+    ...(btState.slopeOn?{slopeOn:true,slopeK:btState.slopeK,slopeBoxKeys:[...btState.slopeBoxKeys]}:{}),
     ...(btState.adxOn?{adxOn:true,adxTf:btState.adxTf,adxThreshold:btState.adxThreshold}:{}),
   };
+}
+function saveBtConfig(){
+  const cfg=btCfgObj();
   const name=(prompt('Tên config:',btState.coin+'_'+btState.dir)||'').trim();
   if(!name)return;
   const blob=new Blob([JSON.stringify(cfg,null,2)],{type:'application/json'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name+'.json';a.click();URL.revokeObjectURL(a.href);
+}
+// ★ BOX ĐỘC LẬP (Save All .zip — mỗi coin 1 file JSON, nút trong bảng tóm tắt theo coin) — dùng lại ĐÚNG
+// btCfgObj(coin) cho từng coin đã thực sự chạy ra kết quả (distinct t.coin trong btState.results), config giống
+// hệt nhau chỉ khác field "coin". Xóa: xóa hàm "btSaveAllCoinConfigs()" này + nút gọi nó trong btCoinSummaryHtml()
+// để gỡ, không ảnh hưởng saveBtConfig()/btCfgObj() hay bảng tóm tắt theo coin.
+function btSaveAllCoinConfigs(){
+  const coins=[...new Set(btState.results.map(t=>t.coin))].filter(Boolean);
+  if(!coins.length){alert('Chưa có kết quả để lưu');return;}
+  const enc=new TextEncoder();
+  const files=coins.map(coin=>({
+    name:enc.encode(coin+'_'+btState.dir+'.json'),
+    data:enc.encode(JSON.stringify(btCfgObj(coin),null,2))
+  }));
+  const blob=new Blob([_makeZip(files)],{type:'application/zip'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='backtest_'+files.length+'-coins.zip';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+// ★ BOX ĐỘC LẬP (Gửi sang Mô phỏng danh mục — nút trong bảng tóm tắt theo coin) — THUẦN TRUYỀN DỮ LIỆU, không
+// tự chạy lại backtest hay tính toán gì mới: dùng lại ĐÚNG btCfgObj(coin) (y hệt btSaveAllCoinConfigs()) để build
+// simState.configs trực tiếp trong bộ nhớ, bỏ qua bước xuất/nhập file JSON. Sau khi gửi, người dùng tự bấm
+// "▶ Chạy mô phỏng" bên module Mô phỏng danh mục — module đó tự gọi lại runBacktest() gốc cho từng coin (xem
+// sim_run()), không có logic tính toán riêng nào ở đây. Xóa: xóa hàm "btSendToSim()" này + nút gọi nó trong
+// btCoinSummaryHtml() để gỡ, không ảnh hưởng btSaveAllCoinConfigs()/btCfgObj() hay module Mô phỏng danh mục.
+function btSendToSim(){
+  const coins=[...new Set(btState.results.map(t=>t.coin))].filter(Boolean);
+  if(!coins.length){alert('Chưa có kết quả để gửi');return;}
+  simState.configs=coins.map(coin=>({...btCfgObj(coin),_name:coin+'_'+btState.dir+'.json'}));
+  simState.nextIndex=0; simState.dayMap={}; simState.series=[];
+  simState.bankruptDay=null; simState.bankruptStopped=false; simState.totalTrades=0; simState.paused=false;
+  simState.winCount=0; simState.closedTrades=0;
+  subBoxOpen.sim=true;
+  renderUtility();
+  document.getElementById('simBoxAnchor')?.scrollIntoView({behavior:'smooth',block:'start'});
 }
 function btStateFromConfig(cfg){
   ['coin','sizeUsd','leverage','start','end','tp','sl','fee','dir','maxOrders'].forEach(k=>{if(cfg[k]!=null)btState[k]=cfg[k];});
@@ -2099,22 +2217,32 @@ function btStateFromConfig(cfg){
       btState[b.key].on=false;
     }
   }
-  // ★ BOX ĐỘC LẬP (Gộp vị thế DCA) — file có field "dca1Pct" → TỰ BẬT mergePositionOn; file không có → TỰ TẮT.
-  // (Đổi từ hành vi cũ "toggle do UI quyết định" sang tự động theo đúng nội dung file, áp dụng chung cho cả
-  // Backtest Detail load tay lẫn Sim — Sim vốn đã tự làm việc này riêng, giờ nhất quán ở đúng 1 chỗ).
-  // Để gỡ: xóa dòng "btState.mergePositionOn=cfg.dca1Pct!=null;" để quay lại "toggle do UI quyết định" như cũ,
-  // không ảnh hưởng 5 dòng cập nhật %DCA bên dưới (giữ nguyên, không đổi).
-  btState.mergePositionOn=cfg.dca1Pct!=null;
-  if(cfg.dca1Pct!=null)btState.mergeDca1Pct=cfg.dca1Pct;
-  if(cfg.dca2Pct!=null)btState.mergeDca2Pct=cfg.dca2Pct;
-  if(cfg.dca1SizePctOfEntry!=null)btState.mergeDca1SizePct=cfg.dca1SizePctOfEntry;
-  if(cfg.dca2SizePctOfEntry!=null)btState.mergeDca2SizePct=cfg.dca2SizePctOfEntry;
+  // ★ BOX ĐỘC LẬP (Gộp vị thế DCA) — file có field "dcaLevels" (mới) HOẶC "dca1Pct" (file CŨ, tương thích ngược)
+  // → TỰ BẬT mergePositionOn; file không có cả 2 → TỰ TẮT. File cũ chỉ có dca1Pct/dca2Pct (2 nấc cố định) →
+  // tự chuyển thành mảng [dca1Pct,dca2Pct], dca1SizePctOfEntry/dca2SizePctOfEntry (thường bằng nhau, mặc định 50)
+  // → lấy dca1SizePctOfEntry làm mergeDcaSizePct chung (khớp đúng hành vi cũ vì trước đây 2 field này luôn = nhau
+  // theo mặc định). Để gỡ: xóa khối "if(cfg.dcaLevels!=null){...}else if(cfg.dca1Pct!=null){...}" để quay lại đọc
+  // thẳng dca1Pct/dca2Pct như cũ (mất khả năng đọc file dcaLevels mới).
+  btState.mergePositionOn=(cfg.dcaLevels!=null)||(cfg.dca1Pct!=null);
+  if(cfg.dcaLevels!=null){
+    btState.mergeDcaLevels=[...cfg.dcaLevels];
+    if(cfg.dcaSizePct!=null)btState.mergeDcaSizePct=cfg.dcaSizePct;
+  } else if(cfg.dca1Pct!=null){
+    btState.mergeDcaLevels=[cfg.dca1Pct,...(cfg.dca2Pct!=null?[cfg.dca2Pct]:[])];
+    if(cfg.dca1SizePctOfEntry!=null)btState.mergeDcaSizePct=cfg.dca1SizePctOfEntry;
+  }
   if(cfg.mergeMaxEntries!=null)btState.mergeMaxEntries=cfg.mergeMaxEntries;
   // ★ BOX ĐỘC LẬP (Độ dốc filter) — file có field "slopeOn" → TỰ BẬT + nạp đúng slopeK; file không có → TỰ TẮT.
   // Áp dụng chung cho cả Backtest Detail load tay lẫn Sim (cùng qua hàm này). Xóa: xóa 2 dòng dưới để gỡ, quay
   // về giữ nguyên slopeOn/slopeK đang có trên UI khi load file, không tự đổi theo file nữa.
   btState.slopeOn=cfg.slopeOn===true;
   btState.slopeK=cfg.slopeK||1;
+  // ★ BOX ĐỘC LẬP (Chọn lọc theo TỪNG filter — tương thích ngược) — file cũ (lưu trước khi có tính năng này) có
+  // slopeOn:true nhưng KHÔNG có field "slopeBoxKeys" → mặc định gán đủ cả 6 key để mô phỏng đúng hành vi cũ "áp
+  // cho cả MACD/CMF/OBV" (không làm mất tác dụng của file cũ). File mới có "slopeBoxKeys" → dùng đúng danh sách
+  // đã lưu. Xóa: xóa khối "Array.isArray(...)..." này, đổi lại thành gán cố định đủ 6 key (hoặc bỏ hẳn dòng này
+  // nếu đã gỡ field slopeBoxKeys) để gỡ.
+  btState.slopeBoxKeys=Array.isArray(cfg.slopeBoxKeys)?[...cfg.slopeBoxKeys]:['macdTrade','cmfTrade','obvTrade','macdTrend','cmfTrend','obvTrend'];
   // ★ BOX ĐỘC LẬP (ADX) — mirror đúng cách slope filter tự bật/tắt theo file. Xóa: xóa 3 dòng dưới để gỡ.
   btState.adxOn=cfg.adxOn===true;
   btState.adxTf=cfg.adxTf||'1d';
@@ -2144,6 +2272,14 @@ function btCfgCard(c,i){
   // gì) — để xác nhận trực quan file vừa upload có bật ADX hay không. Xóa: xóa dòng "adxBadge" này + "${adxBadge}"
   // trong template bên dưới để gỡ riêng, không ảnh hưởng indBadges/slope hay bất kỳ badge nào khác.
   const adxBadge=c.adxOn===true?`<span style="font-size:11px;background:rgba(192,38,211,.15);color:#c026d3;border-radius:5px;padding:2px 7px;white-space:nowrap">ADX·${(c.adxTf||'?').toUpperCase()}≥${c.adxThreshold??'?'}</span>`:'';
+  // ★ BOX ĐỘC LẬP (Dốc theo từng filter) — badge riêng cho card tóm tắt, mirror y hệt cách adxBadge làm, chỉ hiện
+  // khi file JSON có "slopeOn:true" (đọc thẳng c.slopeK, không tính lại gì). Xóa: xóa dòng "slopeBadge" này +
+  // "${slopeBadge}" trong template bên dưới để gỡ riêng, không ảnh hưởng indBadges/adxBadge hay badge nào khác.
+  // ★ BOX ĐỘC LẬP (Chọn lọc theo TỪNG filter — hiển thị tên filter trong badge) — file cũ không có "slopeBoxKeys"
+  // → hiện "tất cả filter" (đúng hành vi cũ). File mới → liệt kê tên các filter đã chọn. Xóa: đổi lại thành
+  // "Dốc·k=${c.slopeK??'?'}" (bỏ phần "slopeBoxTxt") để gỡ, quay về hiển thị k đơn thuần.
+  const slopeBoxTxt=Array.isArray(c.slopeBoxKeys)?c.slopeBoxKeys.map(k=>{const b=BT_IND_BOXES.find(x=>x.key===k);return b?b.label:k;}).join(','):'tất cả filter';
+  const slopeBadge=c.slopeOn===true?`<span style="font-size:11px;background:rgba(79,70,229,.12);color:var(--acc);border-radius:5px;padding:2px 7px;white-space:nowrap">Dốc·${slopeBoxTxt}·k=${c.slopeK??'?'}</span>`:'';
   const dateStr=c.start||c.end?`<span style="font-size:11px;color:var(--dim);margin-left:auto;white-space:nowrap">${c.start||'?'}→${c.end||'?'}</span>`:'';
   return `<div class="bt-cfg-item ${checked?'':'bt-off'}"
     style="flex-direction:column;align-items:flex-start;gap:5px;padding:9px 13px;cursor:pointer"
@@ -2156,6 +2292,7 @@ function btCfgCard(c,i){
       <span style="font-size:11px;background:rgba(139,92,246,.15);color:#a78bfa;border-radius:5px;padding:2px 7px;flex-shrink:0">${sigBadge}</span>
       ${indBadges}
       ${adxBadge}
+      ${slopeBadge}
       ${dateStr}
     </div>
     <div style="display:flex;align-items:center;gap:9px;padding-left:18px;flex-wrap:wrap;min-width:0">
@@ -2224,7 +2361,7 @@ async function runBacktest(){
   if(btState.running)return;
   btState.running=true;
   try{
-    btState.results=[];renderBacktest();btSetStatus('⏳ Đang chạy...');
+    btState.results=[];btState.coinErrors=[];renderBacktest();btSetStatus('⏳ Đang chạy...');
     const configsToRun=btState.mode==='load'?btState.configs.filter(c=>c._checked):[null];
     for(const cfg of configsToRun){
       if(cfg)btStateFromConfig(cfg);
@@ -2235,12 +2372,45 @@ async function runBacktest(){
         if(btState.ovEnd)btState.end=btState.ovEnd;
         if(btState.ovSizeUsd)btState.sizeUsd=+btState.ovSizeUsd;
         if(btState.ovLeverage)btState.leverage=+btState.ovLeverage;
+        // ★ BOX ĐỘC LẬP (WFO — override Fee%) — mirror y hệt ovSizeUsd/ovLeverage. Trước đây WFO không override
+        // fee, khiến OOS âm thầm dùng btState.fee còn sót lại từ lần chỉnh tay trước đó ở Backtest Detail (dù mặc
+        // định 0.1% trùng feeRate nên chưa gây sai lệch thực tế, đây là vá phòng ngừa). Xóa: xóa dòng
+        // "if(btState.ovFee)..." này để gỡ, quay về không override fee khi load config.
+        if(btState.ovFee)btState.fee=+btState.ovFee;
+      }
+      // ★ BOX ĐỘC LẬP (Validate DCA vs SL) — chặn RIÊNG cfg này nếu nấc DCA xa nhất ≥ SL% (giá sẽ chạm SL trước
+      // khi kịp tới nấc DCA cuối). Kiểm tra SAU khi btStateFromConfig()+override đã áp (đúng dca/sl thực tế của
+      // cfg này, không phải state cũ sót lại). Bỏ qua cfg này (giống coin lỗi), chạy tiếp cfg khác. Xóa: xóa khối
+      // "if(btState.mergePositionOn&&...){...continue;}" này để gỡ, không ảnh hưởng gì khác.
+      if(btState.mergePositionOn){
+        const _lv=(Array.isArray(btState.mergeDcaLevels)?btState.mergeDcaLevels:[]).map(Number);
+        const _max=_lv.length?Math.max(..._lv):0;
+        if(_max>=btState.sl){
+          const _nm=_cfgName||btState.coin;
+          btState.coinErrors.push(_nm+': Nấc DCA xa nhất ('+_max+'%) ≥ SL ('+btState.sl+'%) — bỏ qua');
+          continue;
+        }
       }
       // tính ngày SAU khi config + override đã apply
       const startMs=btParseDate(btState.start);
       const endMs=btParseDate(btState.end)+86400000;
       if(!startMs||!endMs){btSetStatus('❌ Ngày không hợp lệ');continue;}
-      const coin=btState.coin.trim().toUpperCase();
+      // ★ BOX ĐỘC LẬP (Multi-coin Backtest Detail) — mode='manual' cho phép nhập nhiều coin (btParseCoins() tách
+      // dấu phẩy/dấu cách/xuống dòng), mode='load' giữ nguyên 1 coin lấy từ file config (không đổi hành vi cũ).
+      // Bọc thêm 1 lớp lặp "for(const coin of coinList)" NGOÀI toàn bộ khối dir/entry/filter gốc — bên trong GIỮ
+      // NGUYÊN 100% không đổi 1 dòng nào. Xóa: đổi dòng "const coinList=..." lại thành
+      // "const coin=btState.coin.trim().toUpperCase();", xóa dòng "for(const coin of coinList){" này và dòng "}"
+      // đóng tương ứng (ngay trước dòng đóng vòng cfg) để gỡ, quay về đúng 1 coin/lượt chạy.
+      const coinList=btState.mode==='manual'?btParseCoins(btState.coin):[btState.coin.trim().toUpperCase()];
+      for(const coin of coinList){
+      // ★ BOX ĐỘC LẬP (Bỏ qua coin lỗi — tiếp tục coin sau) — try/catch RIÊNG cho từng coin: trước đây bt_fetchKlines()
+      // throw (vd mất kết nối Binance) sẽ bay thẳng lên catch NGOÀI CÙNG của runBacktest(), dừng hẳn toàn bộ lượt
+      // chạy (kể cả các coin/config CHƯA chạy tới). Bọc try/catch tại đây để lỗi 1 coin không ảnh hưởng các coin
+      // còn lại — ghi nhận lỗi vào btState.coinErrors, hiện cảnh báo cuối cùng, rồi "continue" sang coin kế tiếp.
+      // Xóa: xóa dòng "try{" này + khối "catch(coinErr){...continue;}" ở cuối vòng coin (ngay trước dòng "}" đóng
+      // "for(const coin of coinList)"), đưa nội dung bên trong ra lại mức thụt lề gốc, để gỡ — quay về hành vi cũ
+      // (1 coin lỗi = dừng toàn bộ).
+      try{
       const dirs=btState.dir==='both'?['buy','sell']:[btState.dir];
       for(const dir of dirs){
         const activeEntry=BT_ENTRY_BOXES.filter(eb=>btState[eb.key].on);
@@ -2305,6 +2475,22 @@ async function runBacktest(){
                 t[box.key+'CandleTs']=bt_bsearchTs(primaryData.opens,t.rawTs,primaryData.pMs);
                 t[box.key+'Val']=bt_bsearchMacd(primaryData.opens,primaryData.hist,t.rawTs,primaryData.pMs);
                 t[box.key+'Tf']=bs.tfs[0];
+                // ★ BOX ĐỘC LẬP (Dốc theo từng filter — bảng Backtest Detail) — CHỈ tính khi btState.slopeOn bật
+                // VÀ box.key nằm trong btState.slopeBoxKeys (đồng bộ đúng với gating thật của bt_slopePass() — tránh
+                // hiển thị "Dốc" cho filter KHÔNG thực sự bị áp độ dốc). Lấy đúng nến lùi btState.slopeK bước của
+                // CHÍNH box này (idx tính bằng bt_bsearchMacdIdx, cùng primaryData.opens/hist/pMs đang dùng để lọc).
+                // Xóa: xóa khối "if(btState.slopeOn&&...){...}" này để gỡ riêng phần hiển thị độ dốc theo từng
+                // filter, không ảnh hưởng CandleTs/Val/Tf ở trên hay bt_slopePass().
+                if(btState.slopeOn&&btState.slopeBoxKeys.includes(box.key)){
+                  const _si=bt_bsearchMacdIdx(primaryData.opens,t.rawTs,primaryData.pMs);
+                  const _sk=_si-btState.slopeK;
+                  if(_sk>=0){
+                    // FIX: dùng thẳng opens[_sk] (giờ MỞ, không +pMs) để khớp đúng quy ước cột "Nến đóng" gốc
+                    // (mirror y hệt fix ở nhánh Gộp vị thế phía trên).
+                    t[box.key+'SlopeCandleTs']=primaryData.opens[_sk];
+                    t[box.key+'SlopeVal']=primaryData.hist[_sk];
+                  }
+                }
               }
             }
           }
@@ -2323,8 +2509,16 @@ async function runBacktest(){
           btState.results.push(...trades);
         }
       }
+      }catch(coinErr){
+        console.error('[BT] Lỗi coin',coin,':',coinErr);
+        btState.coinErrors=btState.coinErrors||[];
+        btState.coinErrors.push(coin+': '+(coinErr.message||coinErr));
+        btSetStatus('⚠ '+coin+' lỗi, bỏ qua — đang tiếp tục coin sau...');
+        continue;
+      }
+      } // ★ BOX ĐỘC LẬP (Multi-coin Backtest Detail) — đóng vòng "for(const coin of coinList)"
     }
-    btState.statusMsg=`✅ Xong — ${btState.results.length} lệnh`;
+    btState.statusMsg=`✅ Xong — ${btState.results.length} lệnh`+((btState.coinErrors&&btState.coinErrors.length)?` ⚠ ${btState.coinErrors.length} coin lỗi (bỏ qua): ${btState.coinErrors.join(' · ')}`:'');
   }catch(e){btState.statusMsg='❌ '+(e.message||e);}
   finally{
     btState.running=false;
@@ -2442,6 +2636,54 @@ function _indHdrBg(b){return b.group==='trade'?'#e9f4f8':'#e9f5ed';}
 const _SIG_BODY_BG='rgba(79,70,229,.06)', _SIG_HDR_BG='#eeecfb', _COL_DIV='border-left:2px solid rgba(15,23,42,.10);';
 // ★ BOX ĐỘC LẬP (ADX) — màu riêng cho cột ADX trong bảng kết quả, tách biệt "Nến Signal"/6 box MACD/CMF/OBV.
 const _ADX_BODY_BG='rgba(192,38,211,.06)', _ADX_HDR_BG='#f7e9fb';
+// ★ BOX ĐỘC LẬP (Multi-coin Backtest Detail — bảng tóm tắt mỗi coin) — chỉ hiện khi kết quả có ≥2 coin khác nhau
+// (chạy 1 coin như trước thì ẩn hoàn toàn, không đổi giao diện cũ). Dùng lại ĐÚNG công thức tính WR/Net PnL%/Net
+// USDT đang dùng cho bảng tổng (btResultsHtml()), chỉ lọc theo t.coin trước khi tính — không tính lại gì khác,
+// không ảnh hưởng bảng tổng hay bảng chi tiết. Xóa: xóa hàm này + dòng gọi "+btCoinSummaryHtml(s.results)" trong
+// btResultsHtml() để gỡ, quay về chỉ có bảng tổng toàn bộ + bảng chi tiết như cũ.
+function btCoinSummaryHtml(results){
+  const coins=[...new Set(results.map(t=>t.coin))].filter(Boolean);
+  if(coins.length<2)return '';
+  const rows=coins.map(coin=>{
+    const rc=results.filter(t=>t.coin===coin);
+    const cc=rc.filter(t=>t.result!=='OPEN');
+    const w=cc.filter(t=>t.result==='WIN').length;
+    const wrp=cc.length?Math.round(w/cc.length*100):0;
+    const netPct=cc.reduce((acc,t)=>{
+      if(t.pnl==null)return acc;
+      const ratio=(t.totalSizeUsed??btState.sizeUsd)/btState.sizeUsd;
+      return acc+(t.pnl-btState.fee)*ratio;
+    },0);
+    const netUsd=cc.reduce((acc,t)=>acc+(t.netUsdt||0),0);
+    const wrc=wrp>=55?'var(--grn)':wrp>=50?'var(--ora)':'var(--red)';
+    const ncC=netPct>=0?'var(--grn)':'var(--red)';
+    return '<tr style="border-bottom:1px solid var(--b2);">'
+      +'<td style="padding:4px 8px;font-weight:700;color:var(--cyn)">'+coin+'</td>'
+      +'<td style="padding:4px 8px;">'+cc.length+' <span style="color:var(--dim);font-size:11px;">('+w+'W/'+(cc.length-w)+'L)</span></td>'
+      +'<td style="padding:4px 8px;color:'+wrc+';font-weight:700">'+wrp+'%</td>'
+      +'<td style="padding:4px 8px;color:'+ncC+';font-weight:700">'+(netPct>=0?'+':'')+netPct.toFixed(1)+'%</td>'
+      +'<td style="padding:4px 8px;color:'+ncC+';font-weight:700">'+(netUsd>=0?'+':'')+'$'+netUsd.toFixed(2)+'</td>'
+      +'</tr>';
+  }).join('');
+  return '<div style="margin:4px 0 12px;">'
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'
+    +'<div class="bt-sec-lbl">Tóm tắt theo từng coin</div>'
+    +'<div style="display:flex;gap:6px;">'
+    +'<button onclick="btSendToSim()" style="font-size:10px;font-weight:700;color:var(--acc);background:rgba(79,70,229,.08);border:1px solid var(--acc);border-radius:6px;padding:3px 9px;cursor:pointer;">📈 MÔ PHỎNG DANH MỤC — '+coins.length+' coin</button>'
+    +'<button onclick="btSaveAllCoinConfigs()" style="font-size:10px;font-weight:700;color:var(--grn);background:rgba(22,163,74,.08);border:1px solid var(--grn);border-radius:6px;padding:3px 9px;cursor:pointer;">💾 Save All (.zip)</button>'
+    +'</div>'
+    +'</div>'
+    +'<table style="width:100%;font-size:12px;border-collapse:collapse;">'
+    +'<tr style="color:var(--dim);text-align:left;border-bottom:1px solid var(--b2);">'
+    +'<th style="padding:4px 8px;">Coin</th><th style="padding:4px 8px;">Lệnh đóng</th><th style="padding:4px 8px;">WR%</th><th style="padding:4px 8px;">Net PnL%</th><th style="padding:4px 8px;">Net USDT</th>'
+    +'</tr>'+rows+'</table></div>';
+}
+// ★ BOX ĐỘC LẬP (Dốc theo từng filter — đồng bộ slopeBoxKeys) — hàm TOÀN CỤC (dùng chung bởi btResultsHtml() và
+// btRowHtml(), 2 hàm khác nhau) quyết định box b có cột "Dốc" thứ 3 hay không: CHỈ khi btState.slopeOn bật VÀ
+// b.key nằm trong btState.slopeBoxKeys (đúng box đang thực sự bị áp độ dốc, không hiển thị nhầm cho box không
+// chọn). Xóa: xóa hàm này + đổi lại các chỗ dùng nó (indColHdrs/indSubHdrs/totalCols/indCells) về "btState.slopeOn"
+// như cũ để gỡ.
+function _hasSlopeCol(b){ return btState.slopeOn&&btState.slopeBoxKeys.includes(b.key); }
 function btResultsHtml(){
   const s=btState;
   if(!s.results.length&&!s.running){btView=null;return'';}
@@ -2464,9 +2706,9 @@ function btResultsHtml(){
   const wr=closed.length?Math.round(wins/closed.length*100):0;
   const indColHdrs=activeInd.map(b=>{
     const txtC=b.group==='trade'?'var(--cyn)':'var(--grn)';
-    return '<th colspan="2" style="text-align:center;font-size:9px;color:'+txtC+';background:'+_indHdrBg(b)+';'+_COL_DIV+'">'+b.label+'</th>';
+    return '<th colspan="'+(_hasSlopeCol(b)?3:2)+'" style="text-align:center;font-size:9px;color:'+txtC+';background:'+_indHdrBg(b)+';'+_COL_DIV+'">'+b.label+'</th>';
   }).join('');
-  const indSubHdrs=activeInd.map(b=>'<th style="background:'+_indHdrBg(b)+';'+_COL_DIV+'">Nến đóng</th><th style="background:'+_indHdrBg(b)+'">Giá trị</th>').join('');
+  const indSubHdrs=activeInd.map(b=>'<th style="background:'+_indHdrBg(b)+';'+_COL_DIV+'">Nến đóng</th><th style="background:'+_indHdrBg(b)+'">Giá trị</th>'+(_hasSlopeCol(b)?'<th style="background:'+_indHdrBg(b)+'">Dốc</th>':'')).join('');
   // ★ BOX ĐỘC LẬP (DCA) — nhân thêm tỷ lệ vốn thực đã dùng/vốn gốc (totalSizeUsed/sizeUsd) vào mỗi lệnh trước khi cộng dồn.
   // Khi DCA tắt/không khớp: t.totalSizeUsed không tồn tại → tỷ lệ luôn =1 → công thức rút gọn về ĐÚNG "Σ(pnl-fee)" như cũ, không lệch.
   // Khi DCA khớp: lệnh dùng nhiều vốn hơn (150/200đ) đóng góp vào tổng % theo đúng tỷ lệ vốn đã dùng, tránh tình trạng %+ nhưng $- do lệnh thua lại nặng vốn hơn lệnh thắng.
@@ -2477,12 +2719,13 @@ function btResultsHtml(){
     return acc+(t.pnl-s.fee)*sizeRatio;
   },0);
   // lưu view cho virtual scroll (thân bảng dựng động khi cuộn)
-  // ★ BOX ĐỘC LẬP (Gộp vị thế DCA) — +3 cột (DCA1/DCA2/Giá TB) chỉ khi s.mergePositionOn bật, totalCols cộng thêm riêng cho box này.
+  // ★ BOX ĐỘC LẬP (Gộp vị thế DCA) — +1 cột (Giá TB) chỉ khi s.mergePositionOn bật (cột DCA1/DCA2 cứng đã bỏ vì
+  // số nấc DCA giờ không giới hạn — xem chi tiết từng nấc qua nút "Chi tiết ›"), totalCols cộng thêm riêng cho box này.
   // ★ BOX ĐỘC LẬP (Giá thoát) — +1 cột LUÔN LUÔN hiện (không phụ thuộc mergePositionOn) → +1 cố định vào totalCols. Xóa cột này ở đây + trong <thead> + trong btRowHtml() để gỡ.
   // ★ BOX ĐỘC LẬP (ADX) — +2 cột (Nến đóng/Giá trị) CHỈ cộng khi hasAdx true, truyền hasAdx qua btView để
   // btRenderRows()/btRowHtml() biết có vẽ 2 <td> ADX hay không. Xóa: xóa "(hasAdx?2:0)" trong totalCols + "hasAdx"
   // trong object này để gỡ.
-  btView={sorted,activeInd,hasAdx,rowH:30,headerH:60,totalCols:15+2*activeInd.length+(hasAdx?2:0)+(s.mergePositionOn?3:0)+(s.mergePositionOn?2:0),_measured:false,dcaOn:s.mergePositionOn}; // +2 cột "Số nấc"/Chi tiết (★ Gộp vị thế) CHỈ cộng khi bật. dcaOn ở đây chỉ dùng nội bộ cho btRenderRows() đo chiều cao, không liên quan tách box.
+  btView={sorted,activeInd,hasAdx,rowH:30,headerH:60,totalCols:15+activeInd.reduce((sum,b)=>sum+(_hasSlopeCol(b)?3:2),0)+(hasAdx?2:0)+(s.mergePositionOn?1:0)+(s.mergePositionOn?2:0),_measured:false,dcaOn:s.mergePositionOn}; // ★ BOX ĐỘC LẬP (Dốc theo từng filter) — dùng "_hasSlopeCol(b)" per-box thay vì "(s.slopeOn?3:2)" áp đồng loạt. Xóa: đổi lại thành "2*activeInd.length" để gỡ. // +2 cột "Số nấc"/Chi tiết (★ Gộp vị thế) CHỈ cộng khi bật. dcaOn ở đây chỉ dùng nội bộ cho btRenderRows() đo chiều cao, không liên quan tách box.
   const nc=netPnlPct>=0?'var(--grn)':'var(--red)';
   const tnc=totalNet>=0?'var(--grn)':'var(--red)';
   const wrc=wr>=55?'var(--grn)':wr>=50?'var(--ora)':'var(--red)';
@@ -2497,6 +2740,7 @@ function btResultsHtml(){
     +'<div class="bt-sum"><div class="bt-sum-lbl">Đỉnh lệnh mở đồng thời</div><div class="bt-sum-val" style="color:var(--acc)"'+(conc.ts?' title="Đạt đỉnh lúc '+btLocalTime(conc.ts)+' (gồm cả lệnh OPEN)"':'')+'>'+conc.max+'</div></div>'
     +'<div class="bt-sum" style="cursor:pointer" onclick="btToggleLossModal(true)" title="Bấm để xem breakdown theo từng config"><div class="bt-sum-lbl">Chuỗi lệnh âm liên tiếp (theo ngày thoát) 🔍</div><div class="bt-sum-val" style="color:var(--red)"'+(lossStreak.ts?' title="Chuỗi kết thúc lúc '+btLocalTime(lossStreak.ts)+'"':'')+'>'+lossStreak.max+'</div></div>'
     +'</div>'
+    +btCoinSummaryHtml(s.results)
     +(openCount?'<div class="bt-open-warn">⚠ '+openCount+' lệnh OPEN — nến chưa đóng, không tính vào summary</div>':'')
     +'<div class="bt-sort-row"><span class="bt-sort-lbl">Sắp xếp theo:</span>'
     +'<button class="bt-sbtn '+(s.sortBy==='entry'?'on':'')+'" onclick="setBtSort(\'entry\',btState.sortBy===\'entry\'?(btState.sortDir===\'asc\'?\'desc\':\'asc\'):\'asc\')">Thời gian vào lệnh '+(s.sortBy==='entry'?(s.sortDir==='asc'?'▲ cũ→mới':'▼ mới→cũ'):'')+'</button>'
@@ -2509,7 +2753,7 @@ function btResultsHtml(){
     +'<th rowspan="2">Slot</th>'
     +'<th rowspan="2">Tín hiệu</th><th rowspan="2">TF</th>'
     +'<th rowspan="2"'+(s.mergePositionOn?' title="Thời điểm Entry gốc khớp (nấc đầu tiên của vị thế)"':'')+'>T.vào (local)</th><th rowspan="2">T.thoát</th><th rowspan="2"'+(s.mergePositionOn?' title="Giá khớp của Entry gốc — xem Giá TB (cuối) để biết giá trung bình sau khi gộp thêm nấc"':'')+'>Giá vào'+(s.mergePositionOn?' (Entry gốc)':'')+'</th>'
-    +(s.mergePositionOn?'<th rowspan="2">DCA1</th><th rowspan="2">DCA2</th><th rowspan="2">Giá TB (cuối)</th>':'') // ★ BOX ĐỘC LẬP (Gộp vị thế DCA) — CHỈ hiện khi s.mergePositionOn bật. Xóa cả khối này để gỡ box "Gộp vị thế DCA".
+    +(s.mergePositionOn?'<th rowspan="2">Giá TB (cuối)</th>':'') // ★ BOX ĐỘC LẬP (Gộp vị thế DCA) — CHỈ hiện khi s.mergePositionOn bật. Xóa cả khối này để gỡ box "Gộp vị thế DCA".
     +'<th rowspan="2" style="color:var(--cyn)">Giá thoát</th>' // ★ BOX ĐỘC LẬP (Giá thoát) — luôn hiện, nằm bên phải "Giá TB" (khi bật DCA) hoặc bên phải "Giá vào" (khi tắt DCA). Xóa th này + cột trong btRowHtml() + bớt "+1" ở totalCols để gỡ.
     +(s.mergePositionOn?'<th rowspan="2">Số nấc</th><th rowspan="2"></th>':'') // ★ BOX ĐỘC LẬP (Gộp vị thế) — CHỈ hiện khi mergePositionOn bật, tắt thì bảng về đúng gốc 100%. Xóa 2 th này + 2 td tương ứng trong btRowHtml() + bỏ "+2" ở totalCols để gỡ.
     +'<th colspan="2" style="text-align:center;font-size:9px;color:var(--acc);background:'+_SIG_HDR_BG+';'+_COL_DIV+'">Nến Signal</th>'
@@ -2544,12 +2788,29 @@ function btRowHtml(t,idx,activeInd,hasAdx){
   const indCells=activeInd.map(b=>{
     const bg=_indBodyBg(b);
     const tf=t[b.key+'Tf'];
-    if(tf==null) return '<td style="background:'+bg+';'+_COL_DIV+'color:var(--dim)">—</td><td style="background:'+bg+';color:var(--dim)">—</td>'; // dòng từ config không dùng chỉ báo này
+    // ★ BOX ĐỘC LẬP (Dốc theo từng filter — đồng bộ slopeBoxKeys) — "_slopeTd" là <td> thứ 3, CHỈ render khi
+    // _hasSlopeCol(b) đúng (slopeOn bật VÀ box này nằm trong slopeBoxKeys) — đồng bộ đúng với header/totalCols.
+    // Xóa: xóa biến "_slopeTd" này + 2 chỗ nối "+_slopeTd" bên dưới (return sớm khi tf==null, và return chính)
+    // để gỡ riêng, không ảnh hưởng 2 cột "Nến đóng"/"Giá trị" gốc.
+    const _slopeTd=_hasSlopeCol(b)?'<td style="background:'+bg+';color:var(--dim)">—</td>':'';
+    if(tf==null) return '<td style="background:'+bg+';'+_COL_DIV+'color:var(--dim)">—</td><td style="background:'+bg+';color:var(--dim)">—</td>'+_slopeTd; // dòng từ config không dùng chỉ báo này
     const ts=t[b.key+'CandleTs'];const val=t[b.key+'Val'];
     const vf=val!=null?(isFinite(val)?(Math.abs(val)<1?val.toFixed(4):val.toFixed(2)):String(val)):'—';
     const vc=val!=null?(val>0?'var(--grn)':'var(--red)'):'var(--dim)';
     const tfTag='<span style="color:var(--acc);font-weight:700">'+String(tf).toUpperCase()+'</span> · ';
-    return '<td style="background:'+bg+';'+_COL_DIV+'color:var(--dim)">'+tfTag+(ts?btLocalTime(ts):'—')+'</td><td style="background:'+bg+';color:'+vc+'">'+vf+'</td>';
+    let slopeTd=_slopeTd;
+    if(_hasSlopeCol(b)){
+      const sTs=t[b.key+'SlopeCandleTs'], sVal=t[b.key+'SlopeVal'];
+      if(sTs!=null&&sVal!=null&&val!=null){
+        const dirUp=val>sVal;
+        const arrow=dirUp?'↑':'↓'; const ac=dirUp?'var(--grn)':'var(--red)';
+        const svf=isFinite(sVal)?(Math.abs(sVal)<1?sVal.toFixed(4):sVal.toFixed(2)):String(sVal);
+        slopeTd='<td style="background:'+bg+';color:var(--dim);font-size:10px;line-height:1.4">'
+          +'<div style="color:'+ac+';font-weight:700">'+arrow+' k='+btState.slopeK+'</div>'
+          +'<div>so '+btLocalTime(sTs)+' = '+svf+'</div></td>';
+      }
+    }
+    return '<td style="background:'+bg+';'+_COL_DIV+'color:var(--dim)">'+tfTag+(ts?btLocalTime(ts):'—')+'</td><td style="background:'+bg+';color:'+vc+'">'+vf+'</td>'+slopeTd;
   }).join('');
   return '<tr style="'+rowBg+'">'
     +'<td class="bt-fz bt-l1" style="background:'+fzBg+';color:var(--dim)">'+(idx+1)+'</td>'
@@ -2561,10 +2822,9 @@ function btRowHtml(t,idx,activeInd,hasAdx){
     +'<td>'+btLocalTime(t.rawTs)+'</td>'
     +'<td style="color:var(--dim)">'+(t.exitTs?btLocalTime(t.exitTs):'—')+'</td>'
     +'<td style="color:var(--hi)">'+(t.entryFmt||'—')+'</td>'
-    +(btState.mergePositionOn // ★ BOX ĐỘC LẬP (Gộp vị thế DCA) — CHỈ hiện khi btState.mergePositionOn bật. Xóa cả khối này để gỡ box "Gộp vị thế DCA".
-      ?'<td style="color:var(--dim)">'+(t.dca1Hit!=null?(t.dca1Hit>100?t.dca1Hit.toFixed(2):t.dca1Hit.toFixed(5)):'—')+'</td>'
-      +'<td style="color:var(--dim)">'+(t.dca2Hit!=null?(t.dca2Hit>100?t.dca2Hit.toFixed(2):t.dca2Hit.toFixed(5)):'—')+'</td>'
-      +'<td style="color:var(--acc);font-weight:700">'+(t.avgEntry!=null?(t.avgEntry>100?t.avgEntry.toFixed(2):t.avgEntry.toFixed(5)):(t.entryFmt||'—'))+'</td>'
+    +(btState.mergePositionOn // ★ BOX ĐỘC LẬP (Gộp vị thế DCA) — CHỈ hiện khi btState.mergePositionOn bật. Cột DCA1/DCA2 cứng đã bỏ (số nấc
+      // giờ không giới hạn) — xem đủ từng nấc DCA/Entry mới qua nút "Chi tiết ›" (btMergeDetailModalHtml, đã tổng quát sẵn). Xóa cả khối này để gỡ box "Gộp vị thế DCA".
+      ?'<td style="color:var(--acc);font-weight:700">'+(t.avgEntry!=null?(t.avgEntry>100?t.avgEntry.toFixed(2):t.avgEntry.toFixed(5)):(t.entryFmt||'—'))+'</td>'
       :'')
     +'<td style="color:'+pnlC+';font-weight:700">'+(t.exitPrice!=null?(t.exitPrice>100?t.exitPrice.toFixed(2):t.exitPrice.toFixed(5)):'—')+'</td>' /* ★ BOX ĐỘC LẬP (Giá thoát) — màu theo WIN/LOSS (dùng chung biến pnlC), luôn hiện. Xóa td này + th ở btResultsHtml() + bớt "+1" totalCols để gỡ. */
     +(btState.mergePositionOn // ★ BOX ĐỘC LẬP (Gộp vị thế) — 2 cột CHỈ hiện khi bật, tắt thì bảng về đúng gốc 100% (không còn cột trống thừa). Xóa cả khối (btState.mergePositionOn?...:'') này + th tương ứng để gỡ.
@@ -2689,7 +2949,7 @@ function btMergeInfoModalHtml(){
             <div style="font-size:9px;font-weight:700;color:var(--acc);margin-bottom:4px;">CÓ</div>
             <div style="width:100%;background:rgba(79,70,229,.05);border:1.5px solid var(--acc);border-radius:10px;padding:8px 10px;">
               <div style="font-size:9.5px;color:var(--hi);line-height:1.7;text-align:left;">
-                ★ Check giới hạn: đã đủ <b>mergeMaxEntries</b> lần Entry mới? (0=∞) → ĐỦ RỒI thì bỏ qua tín hiệu, xử lý y như "KHÔNG"<br>
+                ★ Check giới hạn: đã đủ <b>mergeMaxEntries</b> lần Entry mới? (0 = không cho Entry mới nào cả) → ĐỦ RỒI (hoặc =0) thì bỏ qua tín hiệu, xử lý y như "KHÔNG"<br>
                 a. Chưa đủ → +nấc <b>100% vốn</b> 1 entry đơn, tại giá đóng nến<br>
                 b. avgEntry_mới = cộng dồn total cũ (Entry gốc + mọi DCA đã khớp) + nấc mới<br>
                 c. TP/SL tính lại theo avgEntry_mới<br>
@@ -2725,7 +2985,8 @@ avgEntry_mới = (100+50+100) / (1 + 0,5155 + 1,0204) = 250 / 2,5359 ≈ $98,58
           • Entry mới = LUÔN 100% vốn 1 entry đơn (không phải 50%)<br>
           • Nấc ĐÃ khớp (DCA hoặc Entry) không bao giờ bị hủy/mất — cộng dồn vĩnh viễn vào avgEntry<br>
           • Chỉ lệnh DCA CHƯA khớp mới bị hủy khi có Entry mới<br>
-          • Số lần Entry mới: không giới hạn — mỗi lần đều lặp lại đúng flow (d) này
+          • Số lần Entry mới: theo ô "Entry mới tối đa" — 0 = không cho phép (chỉ Entry gốc + toàn bộ nấc DCA, SL bật vĩnh viễn sau khi khớp đủ nấc cuối), N&gt;0 = tối đa N lần, mỗi lần đều lặp lại đúng flow (d) này<br>
+          • Số nấc DCA: không giới hạn (bấm "+ Thêm DCA"), khớp tuần tự từ nấc 1→cuối; SL chỉ bật khi khớp đủ TOÀN BỘ nấc đã cấu hình
         </div>
       </div>
     </div>
@@ -2779,6 +3040,23 @@ function btMountResults(){
 }
 
 // ─── renderBacktest ───
+// ★ BOX ĐỘC LẬP (UI sửa mergeDcaLevels — thêm/xóa/sửa từng nấc) — chỉ thao tác trên mảng btState.mergeDcaLevels,
+// không đụng thuật toán bt_genMergedPositions(). Xóa: xóa 3 hàm btAddDcaLevel/btRemoveDcaLevel/btSetDcaLevel này
+// + phần render danh sách nấc trong renderBacktest() (khối "${s.mergeDcaLevels.map(...)}") để gỡ, quay lại UI
+// 2 ô DCA1/DCA2 cố định (cần khôi phục thủ công nếu muốn).
+function btAddDcaLevel(){
+  const lv=btState.mergeDcaLevels;
+  const last=lv.length?lv[lv.length-1]:0.5;
+  lv.push(parseFloat((last+0.5).toFixed(2)));
+  renderBacktest();
+}
+function btRemoveDcaLevel(i){
+  btState.mergeDcaLevels.splice(i,1);
+  renderBacktest();
+}
+function btSetDcaLevel(i,val){
+  btState.mergeDcaLevels[i]=+val;
+}
 function renderBacktest(){
   const el=document.getElementById('backtestSection');if(!el)return;
   const s=btState;
@@ -2814,10 +3092,21 @@ function renderBacktest(){
         <div class="toggle-title">🔗 Gộp vị thế DCA
           <button onclick="event.stopPropagation();btToggleMergeInfo(true)" title="Xem sơ đồ flow chi tiết" style="margin-left:6px;width:16px;height:16px;border-radius:50%;border:1px solid var(--acc);background:#fff;color:var(--acc);font-size:10px;font-weight:800;line-height:14px;cursor:pointer;padding:0;vertical-align:1px;">i</button>
         </div>
-        ${s.mergePositionOn?`<div style="display:flex;gap:10px;margin-top:8px;" onclick="event.stopPropagation()">
-          <div><div class="bt-plbl">DCA1 tại -%</div><input class="bt-pinp" type="number" step="0.1" style="width:64px" value="${s.mergeDca1Pct}" oninput="btState.mergeDca1Pct=+this.value"></div>
-          <div><div class="bt-plbl">DCA2 tại -%</div><input class="bt-pinp" type="number" step="0.1" style="width:64px" value="${s.mergeDca2Pct}" oninput="btState.mergeDca2Pct=+this.value"></div>
-          <div><div class="bt-plbl">Entry mới tối đa (0=∞)</div><input class="bt-pinp" type="number" step="1" min="0" style="width:64px" value="${s.mergeMaxEntries}" oninput="btState.mergeMaxEntries=+this.value"></div>
+        ${s.mergePositionOn?`<div onclick="event.stopPropagation()">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:flex-end;">
+            ${s.mergeDcaLevels.map((pct,i)=>`<div>
+              <div class="bt-plbl">DCA${i+1} tại -%</div>
+              <div style="display:flex;gap:2px;align-items:center;">
+                <input class="bt-pinp" type="number" step="0.1" style="width:56px" value="${pct}" oninput="btSetDcaLevel(${i},this.value)">
+                ${s.mergeDcaLevels.length>1?`<button onclick="btRemoveDcaLevel(${i})" title="Xóa nấc này" style="border:none;background:transparent;color:var(--dim);cursor:pointer;font-size:13px;padding:0 2px;">×</button>`:''}
+              </div>
+            </div>`).join('')}
+            <button onclick="btAddDcaLevel()" title="Thêm 1 nấc DCA = nấc cuối + 0.5%" style="height:28px;padding:0 10px;border:1px dashed var(--acc);background:#fff;color:var(--acc);border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;">+ Thêm DCA</button>
+          </div>
+          <div style="display:flex;gap:10px;margin-top:8px;">
+            <div><div class="bt-plbl">Size mỗi nấc DCA %</div><input class="bt-pinp" type="number" step="1" style="width:64px" value="${s.mergeDcaSizePct}" oninput="btState.mergeDcaSizePct=+this.value"></div>
+            <div><div class="bt-plbl">Entry mới tối đa (0 = không cho, chỉ Entry gốc+DCA)</div><input class="bt-pinp" type="number" step="1" min="0" style="width:64px" value="${s.mergeMaxEntries}" oninput="btState.mergeMaxEntries=+this.value"></div>
+          </div>
         </div>`:''}
       </div>
       <div class="toggle-sw ${s.mergePositionOn?'on':''}" onclick="btState.mergePositionOn=!btState.mergePositionOn;if(btState.mergePositionOn)btState.maxOrders=0;renderBacktest();" style="cursor:pointer;"></div>
@@ -2826,7 +3115,20 @@ function renderBacktest(){
     ${s.mode==='manual'?`
     <div class="bt-sec-lbl">Thông số chung</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
-      <div><div class="bt-plbl">Coin</div><input class="bt-pinp" style="width:105px" value="${s.coin}" oninput="btState.coin=this.value.toUpperCase()"></div>
+      <div><div class="bt-plbl">Coin (nhiều coin: cách nhau bằng dấu phẩy, dấu cách, hoặc xuống dòng)</div>
+        <textarea class="bt-pinp" style="width:160px;min-height:34px;max-height:90px;resize:vertical;font-family:'JetBrains Mono',monospace;" oninput="btState.coin=this.value.toUpperCase();btRenderCoinCount();" onblur="renderBacktest()">${s.coin}</textarea>
+        <div id="btCoinCount" style="font-size:10px;color:var(--dim);margin-top:2px;">${btParseCoins(s.coin).length} coin: ${btParseCoins(s.coin).join(', ')||'—'}</div>
+        <div style="display:flex;gap:4px;margin-top:4px;">
+          <button onclick="btLoadTopCoins(10)" style="font-size:9px;padding:2px 6px;border-radius:5px;cursor:pointer;background:var(--bg0);border:1px solid var(--b2);color:var(--dim);">Top 10</button>
+          <button onclick="btLoadTopCoins(20)" style="font-size:9px;padding:2px 6px;border-radius:5px;cursor:pointer;background:var(--bg0);border:1px solid var(--b2);color:var(--dim);">Top 20</button>
+          <button onclick="btLoadTopCoins(50)" style="font-size:9px;padding:2px 6px;border-radius:5px;cursor:pointer;background:var(--bg0);border:1px solid var(--b2);color:var(--dim);">Top 50</button>
+        </div>
+      </div>
+      <!-- BOX DOC LAP (Multi-coin Backtest Detail): textarea thay cho input 1 dong cu, cho phep dan nhieu dong an
+      toan. Dem so coin qua btParseCoins() ngay khi go (khong renderBacktest lai toan trang moi phim de tranh mat
+      focus/con tro giua chung - chi cap nhat rieng div btCoinCount qua btRenderCoinCount(), render lai day du khi
+      roi khoi o - onblur). Go: xoa toan bo khoi div nay + ham btRenderCoinCount() de go, doi lai thanh input 1
+      dong gan value bang s.coin va oninput gan btState.coin nhu cu. -->
       <div><div class="bt-plbl">Size USD</div><input class="bt-pinp" type="number" style="width:72px" value="${s.sizeUsd}" oninput="btState.sizeUsd=+this.value"></div>
       <div><div class="bt-plbl">Đòn bẩy</div><input class="bt-pinp" type="number" style="width:60px" value="${s.leverage}" oninput="btState.leverage=+this.value"></div>
       <div><div class="bt-plbl">Từ ngày (UTC, dd/mm/yyyy)</div><input class="bt-pinp" style="width:120px" placeholder="01/01/2024" value="${s.start}" oninput="btState.start=this.value"></div>
@@ -2862,6 +3164,16 @@ function renderBacktest(){
       <span style="font-size:10px;font-weight:700;color:${s.slopeOn?'var(--acc)':'var(--dim)'};">Tính độ dốc filter (áp cho cả MACD/CMF/OBV)</span>
       ${s.slopeOn?`<span style="font-size:9px;color:var(--dim);margin-left:auto;">so với</span><input type="number" min="1" max="10" value="${s.slopeK}" oninput="btState.slopeK=parseInt(this.value)||1" style="width:40px;text-align:center;background:var(--bg0);border:1.5px solid var(--acc);border-radius:6px;color:var(--acc);padding:3px;font-size:11px;font-weight:800;outline:none;font-family:'JetBrains Mono',monospace;"><span style="font-size:9px;color:var(--dim);">nến trước</span>`:''}
     </div>
+    <!-- ★ BOX ĐỘC LẬP (Chọn lọc theo TỪNG filter — 6 nút tick) — mirror y hệt Optimizer, chọn CỤ THỂ filter nào
+    được áp độ dốc (mặc định đủ cả 6, khớp hành vi cũ). Xóa: xóa div này + dòng cảnh báo dưới để gỡ riêng phần
+    chọn filter, quay về áp đồng loạt (giữ nguyên slopeOn/slopeK ở div trên) — field/tham số boxKey xóa riêng theo
+    chỉ dẫn ở btState/bt_slopePass. -->
+    ${s.slopeOn?`<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:rgba(79,70,229,.05);border:1px solid var(--acc);border-top:none;border-radius:0 0 8px 8px;padding:6px 10px;margin-top:-8px;margin-bottom:8px;">
+      <span style="font-size:9px;color:var(--dim);">áp độ dốc cho filter nào (tick chọn):</span>
+      ${BT_IND_BOXES.map(b=>`<button onclick="const i=btState.slopeBoxKeys.indexOf('${b.key}');i>=0?btState.slopeBoxKeys.splice(i,1):btState.slopeBoxKeys.push('${b.key}');renderBacktest()" style="padding:3px 8px;border-radius:5px;cursor:pointer;font:700 10px/1 'JetBrains Mono',monospace;background:${s.slopeBoxKeys.includes(b.key)?'var(--acc)':'var(--bg0)'};border:1px solid ${s.slopeBoxKeys.includes(b.key)?'var(--acc)':'var(--b2)'};color:${s.slopeBoxKeys.includes(b.key)?'#fff':'var(--dim)'};">${b.label}</button>`).join('')}
+    </div>
+    ${(()=>{const bad=s.slopeBoxKeys.filter(k=>!s[k].on);return bad.length?`<div style="font-size:10px;color:var(--red);margin:-4px 0 8px;">⚠ Đang chọn tính độ dốc cho ${bad.map(k=>BT_IND_BOXES.find(b=>b.key===k).label).join(', ')} nhưng bộ lọc đó đang TẮT — không có tác dụng.</div>`:'';})()}
+    `:''}
 
     <div class="bt-sec-lbl">Bộ lọc Trade (AND · thuận chiều)</div>
     <div class="bt-ind-rows">${BT_IND_BOXES.filter(b=>b.group==='trade').map(b=>{const bs=s[b.key];const on=bs.on;return `
@@ -2880,7 +3192,12 @@ function renderBacktest(){
     <div class="bt-prow">
       <div><div class="bt-plbl">TP%</div><input class="bt-pinp" type="number" style="width:60px" value="${s.tp}" oninput="btState.tp=+this.value"></div>
       <div><div class="bt-plbl">SL%</div><input class="bt-pinp" type="number" style="width:60px" value="${s.sl}" oninput="btState.sl=+this.value"></div>
-      <div><div class="bt-plbl">Fee%</div><input class="bt-pinp" type="number" style="width:60px" value="${s.fee}" oninput="btState.fee=+this.value"></div>
+      <div><div class="bt-plbl">Fee%</div><input class="bt-pinp" type="number" style="width:60px" value="${s.fee}" disabled title="Fee% khoá cố định 0.1%/lệnh — chỉ chỉnh được ở WFO" oninput="btState.fee=+this.value"></div>
+      <!-- ★ BOX ĐỘC LẬP (Backtest Detail — khoá Fee%) — chỉ thêm "disabled" + "title" vào input có sẵn, không đổi
+      giá trị/logic gì khác (oninput vẫn còn nhưng không kích hoạt được vì input đã khoá). Optimizer vốn không có ô
+      fee nào (luôn dùng hằng số feeRate=0.1 cố định), nên không cần khoá thêm. Xóa: xóa 2 thuộc tính "disabled"
+      title="..."" khỏi input Fee% ở trên để gỡ, quay về cho sửa tay như cũ. -->
+
     </div>
     <div style="margin-bottom:10px;"><div class="bt-plbl" style="margin-bottom:5px;">Hướng</div>
       <div class="bt-grp">
@@ -2977,11 +3294,27 @@ let simState={
   // xổ ra. Xóa: xóa field này + hàm sim_cfgSummary() + khối "▼ Xem danh sách..." trong sim_boxHtml() để gỡ riêng,
   // không ảnh hưởng gì tới việc chạy mô phỏng.
   showCfgList:false,
+  // ★ BOX ĐỘC LẬP (Đường vàng — Rút lãi liên tục + Vốn dùng đồng thời) — 6 field mới, HOÀN TOÀN TÁCH RIÊNG khỏi
+  // dayMap/series/bankruptDay gốc (không đọc/ghi lên field nào của model compounding cũ). allPositions lưu lại
+  // legs (ts+costUsd) + exitTs của MỌI lệnh đã chạy (mọi coin, mọi config) để dựng lại "vốn đang dùng đồng thời"
+  // theo từng ngày. wSeries/wBankruptDay/maxDownFromInitWithdrawPct do sim_buildExtraSeries() tính (mô hình rút lãi
+  // liên tục: lãi bị "kẹp trần" về đúng vốn gốc, lỗ thì chịu thật). peakConcurrentCapital/peakConcurrentDay = đỉnh
+  // vốn dùng đồng thời (entry gốc + mọi nấc DCA đang mở, cộng dồn mọi coin) toàn chuỗi.
+  // Để gỡ sạch: xóa 6 field này + hàm sim_buildExtraSeries() + khối "for(const t of btState.results)" (thu thập
+  // allPositions, có comment box riêng) + dòng gọi "sim_buildExtraSeries();" trong sim_run() + tham số thứ 3 của
+  // sim_computeGeom() + tham số thứ 6 "wSeries" của sim_drawBase() + tham số thứ 3 "wPoint" của sim_hoverInfoHtml()
+  // + 4 dòng reset "simState.allPositions=[];simState.wSeries=[];simState.wBankruptDay=null;..." trong
+  // sim_pickFiles()/sim_runOrToggle() + 2 ô thống kê mới + dòng cảnh báo cháy-khi-rút-lãi trong sim_boxHtml().
+  allPositions:[], wSeries:[], wBankruptDay:null, maxDownFromInitWithdrawPct:0,
+  peakConcurrentCapital:0, peakConcurrentDay:null,
 };
 function sim_pickFiles(files){
   simState.configs=[]; simState.nextIndex=0; simState.dayMap={}; simState.series=[];
   simState.bankruptDay=null; simState.bankruptStopped=false; simState.totalTrades=0; simState.paused=false;
   simState.winCount=0; simState.closedTrades=0;
+  // ★ BOX ĐỘC LẬP (Đường vàng — reset cùng lúc với dayMap/series gốc) — xem hướng dẫn gỡ đầy đủ ở comment "let simState".
+  simState.allPositions=[]; simState.wSeries=[]; simState.wBankruptDay=null; simState.maxDownFromInitWithdrawPct=0;
+  simState.peakConcurrentCapital=0; simState.peakConcurrentDay=null;
   let loaded=0;
   for(const f of files){
     const reader=new FileReader();
@@ -3005,10 +3338,18 @@ function sim_cfgSummary(c){
     ? `BOTH · RSI:${c.rsiTf||'?'}/Lv${c.rsiLevel??50}/P${c.rsiPeriod??14} + MFI:${c.mfiTf||'?'}/Lv${c.mfiLevel??50}/P${c.mfiPeriod??14}`
     : `${sig} ${c.entryTf||'?'} · Lv${c.level??50} · P${c.period??14}`;
   const indTxt = BT_IND_BOXES.filter(b=>c[b.key]).map(b=>`${b.label.split(' ')[0]} ${c[b.key]}`).join(', ')||'không filter';
-  const dcaTxt = c.dca1Pct!=null
-    ? `DCA ✓ (${c.dca1Pct}%/${c.dca2Pct}% · size ${c.dca1SizePctOfEntry}%/${c.dca2SizePctOfEntry}%${c.mergeMaxEntries?' · tối đa '+c.mergeMaxEntries+' lần':''})`
+  // ★ BOX ĐỘC LẬP (DCA không giới hạn nấc) — đọc "dcaLevels" (mới, mảng N nấc) HOẶC "dca1Pct/dca2Pct" (file CŨ,
+  // tương thích ngược, hiển thị như 2 nấc). Xóa: xóa khối "const _lv=...; const dcaTxt=..." này, trả lại 2 dòng
+  // "dcaTxt = c.dca1Pct!=null ? ... : 'DCA ✕'" gốc để gỡ.
+  const _lv=Array.isArray(c.dcaLevels)?c.dcaLevels:(c.dca1Pct!=null?[c.dca1Pct,...(c.dca2Pct!=null?[c.dca2Pct]:[])]:null);
+  const _dcaSize=c.dcaSizePct??c.dca1SizePctOfEntry;
+  const dcaTxt = _lv
+    ? `DCA ✓ (${_lv.join('%/')}% · size ${_dcaSize}%/nấc${c.mergeMaxEntries?' · tối đa '+c.mergeMaxEntries+' Entry mới':(c.mergeMaxEntries===0?' · không Entry mới':'')})`
     : 'DCA ✕';
-  const slopeTxt = c.slopeOn===true ? `Dốc ✓ (k=${c.slopeK||1})` : 'Dốc ✕';
+  // ★ BOX ĐỘC LẬP (Chọn lọc theo TỪNG filter — hiển thị tên filter) — mirror y hệt btCfgCard()'s slopeBoxTxt. Xóa:
+  // đổi lại thành "Dốc ✓ (k=${c.slopeK||1})" (bỏ phần tên filter) để gỡ.
+  const slopeBoxTxt=Array.isArray(c.slopeBoxKeys)?c.slopeBoxKeys.map(k=>{const b=BT_IND_BOXES.find(x=>x.key===k);return b?b.label:k;}).join(','):'tất cả filter';
+  const slopeTxt = c.slopeOn===true ? `Dốc ✓ (${slopeBoxTxt} · k=${c.slopeK||1})` : 'Dốc ✕';
   // ★ BOX ĐỘC LẬP (ADX) — hiển thị đúng khi file JSON có field "adxOn:true" (đọc thẳng, không tính lại gì), mirror
   // y hệt cách slopeTxt ở trên hiển thị. Xóa: xóa dòng "adxTxt" này + phần "<span ...>${adxTxt}</span>" trong
   // template bên dưới để gỡ riêng, không ảnh hưởng slopeTxt/dcaTxt/indTxt hay bất kỳ phần nào khác.
@@ -3016,7 +3357,7 @@ function sim_cfgSummary(c){
   const mo = c.maxOrders===0?'Multi':(c.maxOrders??1)+' lệnh';
   return `<div style="font-size:10px;color:var(--dim);padding:6px 8px;border-top:1px solid var(--b1);">
     <span style="color:var(--hi);font-weight:700;">${esc(c._name||'?')}</span> · ${esc(c.coin||'?')} · ${c.dir||'?'} · ${esc(entryTxt)} · TP${c.tp}/SL${c.sl} · ${mo}
-    <br>${esc(indTxt)} · <span style="color:${c.dca1Pct!=null?'var(--grn)':'var(--dim)'}">${dcaTxt}</span> · <span style="color:${c.slopeOn===true?'var(--acc)':'var(--dim)'}">${slopeTxt}</span> · <span style="color:${c.adxOn===true?'#c026d3':'var(--dim)'}">${adxTxt}</span>
+    <br>${esc(indTxt)} · <span style="color:${_lv?'var(--grn)':'var(--dim)'}">${dcaTxt}</span> · <span style="color:${c.slopeOn===true?'var(--acc)':'var(--dim)'}">${slopeTxt}</span> · <span style="color:${c.adxOn===true?'#c026d3':'var(--dim)'}">${adxTxt}</span>
   </div>`;
 }
 function sim_dayKey(ms){ return new Date(ms).toISOString().slice(0,10); }
@@ -3048,6 +3389,46 @@ function sim_buildSeries(){
   simState.maxDrawdownPct=maxDd;
   simState.maxDownFromInitPct=maxDownFromInit;
 }
+// ★ BOX ĐỘC LẬP (Đường vàng — Rút lãi liên tục + Vốn dùng đồng thời, chỉ trong Mô phỏng danh mục) — TÁCH HOÀN
+// TOÀN khỏi sim_buildSeries() ở trên (không đọc/sửa capital/series/bankruptDay/maxDrawdownPct gốc), chỉ ĐỌC lại
+// simState.dayMap (PnL theo ngày, đã gồm fee — y hệt nguồn dữ liệu series gốc dùng) + simState.series (để lấy
+// đúng dải ngày đã dựng sẵn, không tính lại range ngày) + simState.allPositions (legs mọi lệnh, mọi coin).
+// 2 phép tính độc lập:
+//  (a) wCap — mô hình "rút lãi liên tục": lãi thì bị kẹp trần về đúng vốn gốc (coi như rút hết ra ngay), lỗ thì
+//      chịu thật (không được bù bằng lãi trước đó vì lãi đã rút mất). Vì đỉnh luôn = vốn gốc (không bao giờ vượt),
+//      "Max Down từ đỉnh" và "Max Down từ vốn gốc" của đường này LÀ MỘT — chỉ cần 1 số duy nhất.
+//  (b) inUse — vốn đang bị chiếm dụng mỗi ngày = cộng dồn costUsd mọi nấc (entry gốc + toàn bộ DCA đã khớp, mọi
+//      coin) của các vị thế CHƯA đóng tại ngày đó — tính bằng sweep-line (cộng tại ngày mở nấc, trừ tại ngày đóng
+//      vị thế; lệnh OPEN không trừ, tính chiếm dụng tới hết chuỗi) để tránh vòng lặp O(ngày×lệnh) chậm.
+// Để gỡ: xem hướng dẫn đầy đủ ở comment "let simState" phía trên hàm sim_pickFiles().
+function sim_buildExtraSeries(){
+  simState.wSeries=[]; simState.wBankruptDay=null; simState.maxDownFromInitWithdrawPct=0;
+  simState.peakConcurrentCapital=0; simState.peakConcurrentDay=null;
+  if(!simState.series.length)return;
+  const initCap=simState.capital||10000;
+  // sweep-line vốn dùng đồng thời: +costUsd tại ngày mở nấc, -costUsd tại ngày đóng vị thế (OPEN thì không trừ)
+  const delta={};
+  for(const pos of simState.allPositions){
+    const closeKey=pos.exitTs!=null?sim_dayKey(pos.exitTs):null;
+    for(const leg of pos.legs){
+      const openKey=sim_dayKey(leg.ts);
+      delta[openKey]=(delta[openKey]||0)+leg.costUsd;
+      if(closeKey!=null) delta[closeKey]=(delta[closeKey]||0)-leg.costUsd;
+    }
+  }
+  let wCap=initCap, inUse=0;
+  for(const p of simState.series){
+    const key=p.date;
+    wCap+=(simState.dayMap[key]||0);
+    if(wCap>=initCap) wCap=initCap; // rút lãi ngay khi đạt/vượt vốn gốc
+    inUse+=(delta[key]||0);
+    if(inUse>simState.peakConcurrentCapital){ simState.peakConcurrentCapital=inUse; simState.peakConcurrentDay=key; }
+    const devInit=initCap>0?(wCap-initCap)/initCap*100:0;
+    if(devInit<simState.maxDownFromInitWithdrawPct) simState.maxDownFromInitWithdrawPct=devInit;
+    simState.wSeries.push({date:key,wCap});
+    if(wCap<=0){ simState.wBankruptDay=key; break; } // cháy khi rút lãi liên tục → dừng vẽ tiếp đường vàng tại đây
+  }
+}
 async function sim_run(){
   if(simState.running)return;
   simState.running=true; simState.paused=false; simState.pauseRequested=false;
@@ -3073,13 +3454,24 @@ async function sim_run(){
       btState.ovSizeUsd=simState.sizeUsd||''; btState.ovLeverage=simState.leverage||'';
       btState.ovStart=simState.startDate||''; // để trống = dùng ngày trong file config
       btState.ovEnd=simState.endDate||todayStr(); // ★ để trống = mặc định chạy tới hiện tại (không phụ thuộc ngày lưu trong file)
-      btState.mergePositionOn=(cfg.dca1Pct!=null); // ★ đúng theo đúng cấu hình từng file, không dùng toggle UI hiện tại
+      btState.mergePositionOn=(cfg.dcaLevels!=null)||(cfg.dca1Pct!=null); // ★ đúng theo đúng cấu hình từng file (mới lẫn cũ), không dùng toggle UI hiện tại — btStateFromConfig() bên trong runBacktest() sẽ ghi đè lại chính xác hơn ngay sau đó, dòng này chỉ để hiển thị đúng ngay khi vừa gán trước khi chạy
       await runBacktest();
       for(const t of btState.results){
         if(t.result!=='OPEN'){ simState.closedTrades++; if(t.result==='WIN')simState.winCount++; }
         if(t.exitTs==null)continue; // OPEN — chưa đóng, không tính vào vốn ngày
         const day=sim_dayKey(t.exitTs);
         simState.dayMap[day]=(simState.dayMap[day]||0)+(t.netUsdt||0);
+      }
+      // ★ BOX ĐỘC LẬP (Đường vàng — thu thập legs cho "vốn dùng đồng thời") — vòng lặp RIÊNG, không đụng vòng lặp
+      // dayMap ở trên. Lệnh gộp DCA có t.legs (từng nấc: ts+costUsd thật) → dùng thẳng. Lệnh thường (không gộp)
+      // không có t.legs → coi là 1 nấc duy nhất = sizeUsd tại rawTs (khớp đúng cách netUsdt fallback btState.sizeUsd
+      // khi không DCA). Lệnh OPEN (exitTs=null) VẪN được thu thập (khác vòng dayMap ở trên) vì vốn của nó vẫn đang
+      // bị chiếm dụng tới cuối chuỗi ngày. Xem hướng dẫn gỡ đầy đủ ở comment "let simState".
+      for(const t of btState.results){
+        const legs=(Array.isArray(t.legs)&&t.legs.length)
+          ? t.legs.map(l=>({ts:l.ts,costUsd:l.costUsd}))
+          : [{ts:t.rawTs,costUsd:(t.totalSizeUsed??btState.sizeUsd)}];
+        simState.allPositions.push({legs,exitTs:t.exitTs??null});
       }
       simState.totalTrades+=btState.results.length;
       simState.nextIndex=i+1;
@@ -3097,6 +3489,10 @@ async function sim_run(){
     renderBacktest=_origRenderBacktest;
     Object.assign(btState,saved);
     simState.running=false;
+    // ★ BOX ĐỘC LẬP (Đường vàng) — tính 1 LẦN DUY NHẤT sau khi toàn bộ config đã chạy xong (không tính lặp lại
+    // giữa chừng như sim_buildSeries() — không cần thiết vì đường vàng chỉ hiện ở lần vẽ cuối cùng). Xem hướng dẫn
+    // gỡ đầy đủ ở comment "let simState".
+    sim_buildExtraSeries();
     renderBacktest(); renderUtility(); // vẽ 1 lần duy nhất — toàn bộ biểu đồ hoàn chỉnh
   }
 }
@@ -3105,12 +3501,19 @@ function sim_runOrToggle(){
   if(simState.nextIndex>0&&simState.nextIndex<simState.configs.length){ sim_run(); return; }
   simState.nextIndex=0; simState.dayMap={}; simState.series=[]; simState.bankruptDay=null; simState.bankruptStopped=false; simState.totalTrades=0;
   simState.winCount=0; simState.closedTrades=0;
+  // ★ BOX ĐỘC LẬP (Đường vàng — reset cùng lúc chạy mới từ đầu) — xem hướng dẫn gỡ đầy đủ ở comment "let simState".
+  simState.allPositions=[]; simState.wSeries=[]; simState.wBankruptDay=null; simState.maxDownFromInitWithdrawPct=0;
+  simState.peakConcurrentCapital=0; simState.peakConcurrentDay=null;
   sim_run();
 }
 function sim_fmtUsd(v){ return '$'+Math.round(v).toLocaleString(); }
 // ★ Trục ngày/vốn — Xóa: xóa khối vẽ "TRỤC NGANG (ngày)" + "TRỤC DỌC (vốn)" bên dưới trong hàm này để gỡ riêng
 // phần trục, giữ nguyên line chart + mốc vốn ban đầu (không ảnh hưởng phần còn lại).
-function sim_drawBase(cv,ctx,series,geom,initialCapital){
+// ★ BOX ĐỘC LẬP (Đường vàng) — tham số thứ 5 "wSeries" TÙY CHỌN, không truyền = hệt hành vi cũ (khối vẽ đường vàng
+// ở cuối hàm chỉ chạy khi có truyền + có dữ liệu). Dùng chung geom.xAt/yAt với đường chính — geom PHẢI được tính
+// bằng sim_computeGeom(cv,series,wSeries) (đã mở rộng ở trên) để không bị cắt hình. Xem hướng dẫn gỡ đầy đủ ở
+// comment "let simState".
+function sim_drawBase(cv,ctx,series,geom,initialCapital,wSeries){
   const {padL,padR,padT,padB,xAt,yAt}=geom;
   ctx.clearRect(0,0,cv.width,cv.height);
   ctx.font='22px "JetBrains Mono",monospace'; ctx.textBaseline='middle';
@@ -3154,6 +3557,19 @@ function sim_drawBase(cv,ctx,series,geom,initialCapital){
     }
   }
 
+  // ★ BOX ĐỘC LẬP (Đường vàng — Rút lãi liên tục) — index i của wSeries khớp 1:1 với index i của series chính (cả
+  // 2 cùng dựng từ cùng dải ngày liên tục, wSeries chỉ có thể NGẮN HƠN nếu cháy sớm — không lệch ngày). Xem hướng
+  // dẫn gỡ đầy đủ ở comment "let simState".
+  if(wSeries&&wSeries.length){
+    ctx.beginPath();
+    wSeries.forEach((p,i)=>{ const x=xAt(i), y=yAt(p.wCap); if(i===0)ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+    ctx.strokeStyle='#eab308'; ctx.lineWidth=3; ctx.stroke();
+    if(simState.wBankruptDay){
+      const iEnd=wSeries.length-1;
+      ctx.beginPath(); ctx.arc(xAt(iEnd),yAt(wSeries[iEnd].wCap),5,0,Math.PI*2); ctx.fillStyle='#eab308'; ctx.fill();
+    }
+  }
+
   // ── TRỤC NGANG (ngày) — ngày đầu mỗi tháng + luôn thêm ngày cuối cùng của biểu đồ ──
   // ★ Chống đè chữ: bỏ qua nhãn tháng nào cách nhãn liền trước < minGap px, và bỏ qua nhãn quá gần nhãn ngày cuối
   // (nhãn ngày cuối luôn ưu tiên hiện). Xóa: gỡ 2 dòng "if(x-lastLabelX..." + "if(xLastPos..." để về hiện đủ mọi tháng.
@@ -3188,15 +3604,22 @@ function sim_drawBase(cv,ctx,series,geom,initialCapital){
     ctx.fillText(pLast.date.slice(8,10)+'/'+pLast.date.slice(5,7)+'/'+pLast.date.slice(2,4),cv.width-padR,cv.height-padB+8); // ★ rút gọn DD/MM/YY
   }
 }
-function sim_hoverInfoHtml(p,prev){
+// ★ BOX ĐỘC LẬP (Đường vàng) — tham số thứ 3 "wPoint" TÙY CHỌN (điểm wSeries khớp đúng ngày p.date, hoặc null nếu
+// đường vàng đã cháy trước ngày này). Không truyền = hệt hành vi cũ. Xem hướng dẫn gỡ đầy đủ ở comment "let simState".
+function sim_hoverInfoHtml(p,prev,wPoint){
   const delta=prev?p.capital-prev.capital:0;
   const deltaC=delta>0?'var(--grn)':delta<0?'var(--red)':'var(--dim)';
-  return `<b>${esc(p.date)}</b> · Vốn: <b>$${Math.round(p.capital).toLocaleString()}</b> · Ngày này: <span style="color:${deltaC}">${delta>=0?'+':''}$${Math.round(delta).toLocaleString()}</span>`;
+  const wTxt=wPoint?` · <span style="color:#ca8a04">Vốn nếu rút lãi liên tục: <b>$${Math.round(wPoint.wCap).toLocaleString()}</b></span>`:(simState.wBankruptDay?` · <span style="color:#ca8a04">Đã cháy nếu rút lãi liên tục (từ ${esc(simState.wBankruptDay)})</span>`:'');
+  return `<b>${esc(p.date)}</b> · Vốn: <b>$${Math.round(p.capital).toLocaleString()}</b> · Ngày này: <span style="color:${deltaC}">${delta>=0?'+':''}$${Math.round(delta).toLocaleString()}</span>${wTxt}`;
 }
 // ★ geom tính LUÔN theo series đầy đủ (full) — dùng chung cho vẽ tĩnh + animation, để trục X/Y không bị đổi tỉ lệ
 // giữa các khung hình khi đang chạy động (sim_playAnimation chỉ vẽ dần 1 phần điểm nhưng theo đúng geom cố định này).
-function sim_computeGeom(cv,fullSeries){
+// ★ BOX ĐỘC LẬP (Đường vàng) — tham số thứ 3 "extraSeries" TÙY CHỌN, không truyền = hệt hành vi cũ. Có truyền thì
+// gộp thêm giá trị wCap vào phép tính min/max để trục Y đủ rộng chứa cả đường vàng (không bị cắt hình khi rút lãi
+// kéo sâu xuống dưới). Xem hướng dẫn gỡ đầy đủ ở comment "let simState".
+function sim_computeGeom(cv,fullSeries,extraSeries){
   const vals=fullSeries.map(p=>p.capital);
+  if(extraSeries&&extraSeries.length) vals.push(...extraSeries.map(p=>p.wCap));
   const minV=Math.min(0,...vals), maxV=Math.max(...vals);
   const padL=78*2, padR=92*2, padT=16*2, padB=34*2; // ★ padR đủ rộng để không cắt số $ mốc kết thúc (VD "$4,050") — đây là nguyên nhân số bị cắt trước đó
   return {
@@ -3213,13 +3636,15 @@ function sim_playAnimation(){
   const ctx=cv.getContext('2d');
   const series=simState.series; if(!series.length)return;
   if(sim_animTimer){clearInterval(sim_animTimer);sim_animTimer=null;}
-  const geom=sim_computeGeom(cv,series);
+  const wSeriesFull=simState.wSeries||[]; // ★ BOX ĐỘC LẬP (Đường vàng) — xem hướng dẫn gỡ đầy đủ ở comment "let simState".
+  const geom=sim_computeGeom(cv,series,wSeriesFull);
   const hoverEl=document.getElementById('simHoverInfo');
   let i=0;
   const initCap=simState.capital||10000;
   sim_animTimer=setInterval(()=>{
-    sim_drawBase(cv,ctx,series.slice(0,i+1),geom,initCap);
-    if(hoverEl)hoverEl.innerHTML=sim_hoverInfoHtml(series[i],series[i-1]);
+    const wSlice=wSeriesFull.slice(0,i+1);
+    sim_drawBase(cv,ctx,series.slice(0,i+1),geom,initCap,wSlice);
+    if(hoverEl)hoverEl.innerHTML=sim_hoverInfoHtml(series[i],series[i-1],wSlice[i]||null);
     i++;
     if(i>=series.length){clearInterval(sim_animTimer);sim_animTimer=null;}
   },35);
@@ -3232,10 +3657,11 @@ function sim_drawChart(){
   const series=simState.series;
   const hoverEl=document.getElementById('simHoverInfo');
   if(!series.length){ ctx.clearRect(0,0,cv.width,cv.height); return; }
-  const geom=sim_computeGeom(cv,series);
+  const wSeries=simState.wSeries||[]; // ★ BOX ĐỘC LẬP (Đường vàng) — xem hướng dẫn gỡ đầy đủ ở comment "let simState".
+  const geom=sim_computeGeom(cv,series,wSeries);
   const {padL,padR,padT,padB}=geom;
   const initCap=simState.capital||10000;
-  sim_drawBase(cv,ctx,series,geom,initCap);
+  sim_drawBase(cv,ctx,series,geom,initCap,wSeries);
   // ★ Hover — mỗi điểm = 1 ngày (nến 1d). Xóa: xóa hàm sim_drawBase/sim_hoverInfoHtml + khối mousemove/mouseleave này +
   // #simHoverInfo trong sim_boxHtml() để gỡ riêng phần hover, không ảnh hưởng phần vẽ chart cơ bản.
   cv.onmousemove=(e)=>{
@@ -3246,15 +3672,20 @@ function sim_drawChart(){
     let idx=Math.round((mx-padL)/step);
     idx=Math.max(0,Math.min(series.length-1,idx));
     const p=series[idx], prev=series[idx-1];
-    sim_drawBase(cv,ctx,series,geom,initCap);
+    sim_drawBase(cv,ctx,series,geom,initCap,wSeries);
     const x=geom.xAt(idx), y=geom.yAt(p.capital);
     ctx.beginPath(); ctx.arc(x,y,6,0,Math.PI*2); ctx.fillStyle=p.capital>=initCap?'#16a34a':'#dc2626'; ctx.fill();
     ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,cv.height-padB);
     ctx.strokeStyle='rgba(120,120,120,.35)'; ctx.lineWidth=1.5; ctx.stroke();
-    if(hoverEl)hoverEl.innerHTML=sim_hoverInfoHtml(p,prev);
+    // ★ BOX ĐỘC LẬP (Đường vàng) — chấm vàng tại đúng điểm hover nếu đường vàng còn dữ liệu ở ngày đó (idx < wSeries.length).
+    if(idx<wSeries.length){
+      const wy=geom.yAt(wSeries[idx].wCap);
+      ctx.beginPath(); ctx.arc(x,wy,5,0,Math.PI*2); ctx.fillStyle='#eab308'; ctx.fill();
+    }
+    if(hoverEl)hoverEl.innerHTML=sim_hoverInfoHtml(p,prev,wSeries[idx]||null);
   };
   cv.onmouseleave=()=>{
-    sim_drawBase(cv,ctx,series,geom,initCap);
+    sim_drawBase(cv,ctx,series,geom,initCap,wSeries);
     if(hoverEl)hoverEl.innerHTML='Di chuột vào biểu đồ để xem chi tiết từng ngày';
   };
 }
@@ -3277,7 +3708,7 @@ function sim_boxHtml(){
   const btnLabel=s.running?'⏸ Tạm dừng':(s.nextIndex>0&&s.nextIndex<totalCfg?'▶ Tiếp tục':'▶ Chạy mô phỏng');
   return `
     <!-- ★ BOX ĐỘC LẬP (Mô phỏng danh mục) — xem hướng dẫn gỡ đầy đủ ở comment "let simState" phía trên hàm sim_pickFiles(). -->
-    <div style="background:var(--bg1);border:1px solid var(--b1);border-radius:12px;padding:14px;margin-top:14px;">
+    <div id="simBoxAnchor" style="background:var(--bg1);border:1px solid var(--b1);border-radius:12px;padding:14px;margin-top:14px;">
       <div onclick="subBoxOpen.sim=!subBoxOpen.sim;renderUtility()" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;margin-bottom:${subBoxOpen.sim?'10px':'0'};">
         <div style="font-size:11px;font-weight:900;color:var(--grn);letter-spacing:1px;">📈 MÔ PHỎNG DANH MỤC — dùng lại thuật toán Backtest Detail</div>
         <div style="font-size:10px;font-weight:700;color:var(--grn);background:rgba(22,163,74,.08);border:1px solid var(--grn);border-radius:6px;padding:3px 10px;flex-shrink:0;">${subBoxOpen.sim?'▲ Ẩn':'▼ Hiện'}</div>
@@ -3352,8 +3783,18 @@ function sim_boxHtml(){
           <div style="font-size:9px;font-weight:700;color:var(--hi);">TỔNG LỆNH</div>
           <div style="font-size:14px;font-weight:800;color:var(--hi);">${s.totalTrades}</div>
         </div>
+        <!-- ★ BOX ĐỘC LẬP (Đường vàng) — 2 ô thống kê mới, CHỈ thêm, không đổi 6 ô phía trên. Xem hướng dẫn gỡ đầy đủ ở comment "let simState". -->
+        <div style="background:var(--bg0);border:1px solid #eab308;border-radius:10px;padding:8px 14px;min-width:140px;">
+          <div style="font-size:9px;font-weight:700;color:#ca8a04;">MAX DOWN TỪ VỐN GỐC <span style="font-weight:400;color:var(--dim);">(rút lãi liên tục)</span></div>
+          <div style="font-size:14px;font-weight:800;color:#ca8a04;">${s.maxDownFromInitWithdrawPct.toFixed(1)}%</div>
+        </div>
+        <div style="background:var(--bg0);border:1px solid var(--b1);border-radius:10px;padding:8px 14px;min-width:150px;">
+          <div style="font-size:9px;font-weight:700;color:var(--hi);">VỐN DÙNG ĐỒNG THỜI NHIỀU NHẤT <span style="font-weight:400;color:var(--dim);">(entry+DCA, mọi coin)</span></div>
+          <div style="font-size:14px;font-weight:800;color:var(--hi);">$${Math.round(s.peakConcurrentCapital).toLocaleString()}${s.peakConcurrentDay?` <span style="font-size:10px;font-weight:400;color:var(--dim);">(${esc(s.peakConcurrentDay)})</span>`:''}</div>
+        </div>
       </div>
       ${s.bankruptDay?`<div style="font-size:11px;color:var(--red);background:rgba(220,38,38,.06);border:1px solid var(--red);border-radius:8px;padding:6px 12px;margin-bottom:10px;">⚠ Cạn vốn tại ngày ${esc(s.bankruptDay)}</div>`:''}
+      ${s.wBankruptDay?`<div style="font-size:11px;color:#ca8a04;background:rgba(234,179,8,.08);border:1px solid #eab308;border-radius:8px;padding:6px 12px;margin-bottom:10px;">🟡 Cạn vốn tại ngày ${esc(s.wBankruptDay)} <b>NẾU rút lãi liên tục</b> (đường vàng trên biểu đồ)</div>`:''}
       <canvas id="simCanvas" style="width:100%;height:230px;display:block;cursor:crosshair;"></canvas>
       <div id="simHoverInfo" style="font-size:11px;color:var(--dim);margin-top:6px;">Di chuột vào biểu đồ để xem chi tiết từng ngày</div>
       `:'<div style="font-size:11px;color:var(--dim);">Chưa có kết quả — load config rồi bấm Chạy mô phỏng.</div>'}
@@ -3408,6 +3849,10 @@ let wfoState = {
   // sạch, không ảnh hưởng gì tới Optimizer/Backtest Detail (2 cờ đó vẫn hoạt động độc lập bình thường ngoài lúc
   // chạy WFO).
   slopeOn:false, slopeKs:[1],
+  // ★ BOX ĐỘC LẬP (Chọn lọc theo TỪNG filter — slopeBoxKeys) — mirror y hệt optState.slopeBoxKeys, mặc định đủ cả
+  // 6. Xóa: xóa field này + dòng mirror "optState.slopeBoxKeys=[...wfoState.slopeBoxKeys]" (2 chỗ trong wfo_run())
+  // + "slopeBoxKeys" trong 2 chỗ build cfg OOS/deploy + 6 nút tick trong wfo_boxHtml() để gỡ.
+  slopeBoxKeys:['macdTrade','cmfTrade','obvTrade','macdTrend','cmfTrend','obvTrend'],
   // ★ BOX ĐỘC LẬP (ADX) — KHÔNG build lại thuật toán tải/tính ADX, chỉ gọi luôn cờ đã có sẵn ở Optimizer
   // (optState.adxOn/adxTfs/adxThresholds) trong bước Optimize IS (WFO tự dò tổ hợp qua từng TF/ngưỡng, giống
   // TP/SL/level/slope), rồi truyền đúng TF/ngưỡng thắng của mỗi đoạn xuống Backtest Detail (btState.adxOn/adxTf/
@@ -3424,6 +3869,13 @@ let wfoState = {
   // dòng set btState.ovSizeUsd/ovLeverage trong wfo_run() (trả về '') + phần đổi % ở mục 4 để gỡ riêng, không
   // ảnh hưởng 4 công thức ổn định ở mục 3 (chúng tính trên %pnl, không đụng vốn/đòn bẩy/size).
   capital:1000, leverage:10, sizeUsd:10,
+  // ★ BOX ĐỘC LẬP (WFO — Fee%) — mirror y hệt cách sizeUsd/leverage override btState qua ovSizeUsd/ovLeverage (xem
+  // comment ngay trên). Trước đây WFO không có field fee riêng, khiến OOS âm thầm dùng btState.fee còn sót lại từ
+  // Backtest Detail (mặc định 0.1% trùng feeRate nên chưa gây sai lệch thực tế, đây là vá phòng ngừa). Xóa: xóa
+  // field "fee" này + input tương ứng trong 1a + phần "btState.ovFee=wfoState.fee||'';" nối cạnh dòng gán
+  // ovSizeUsd/ovLeverage (1 chỗ trong wfo_run(), dùng chung cho cả vòng OOS lẫn đoạn deploy) + dòng
+  // "if(btState.ovFee)..." trong runBacktest() để gỡ, quay về không kiểm soát fee riêng ở WFO.
+  fee:0.1,
   // ★ Số lệnh tối đa cùng lúc — dùng thật trong cả bước IS (optState.maxOrders) lẫn OOS (cfg.maxOrders), vì Optimizer
   // có hỗ trợ tham số này thật (đưa vào _genTrades). Khác DCA (mergePositionOn) — cái đó Optimizer KHÔNG hỗ trợ nên
   // không đưa vào WFO Runner. Xóa: xóa field "maxOrders" này + 4 nút chọn trong 1a + đổi "wfoState.maxOrders" thành
@@ -3639,7 +4091,7 @@ async function wfo_run(){
       // tính fee mới) để bước CHỌN winner mỗi đoạn khớp với bước ĐÁNH GIÁ 4 công thức ổn định (đều dùng net pnl sau
       // phí). Xóa: đổi lại thành 'pnl' để quay về sort theo pnl thô như trước, không ảnh hưởng gì khác.
       optState.consecLossOn=false; optState.maxOrders=wfoState.maxOrders; optState.sortBy='netpnl';
-      optState.slopeOn=wfoState.slopeOn; optState.slopeKs=[...wfoState.slopeKs];
+      optState.slopeOn=wfoState.slopeOn; optState.slopeKs=[...wfoState.slopeKs]; optState.slopeBoxKeys=[...wfoState.slopeBoxKeys];
       // ★ BOX ĐỘC LẬP (ADX) — mirror y hệt cách slope filter mirror ở trên, dùng lại đúng thuật toán tải/tính ADX
       // sẵn có ở runOptimizer(), không viết lại gì. Xóa: xóa dòng dưới để gỡ.
       optState.adxOn=wfoState.adxOn; optState.adxTfs=[...wfoState.adxTfs]; optState.adxThresholds=[...wfoState.adxThresholds];
@@ -3658,7 +4110,7 @@ async function wfo_run(){
         // lại khi dò slopeKs) xuống cfg để btStateFromConfig() (gọi bên trong runBacktest()) nạp đúng k, KHÔNG
         // dùng wfoState.slopeK cố định nữa. Xóa: xóa dòng "...(wfoState.slopeOn...)" này để gỡ, cfg trở lại không
         // có field slopeOn/slopeK (OOS sẽ không áp độ dốc, giống hành vi trước khi có box này).
-        ...(wfoState.slopeOn&&w.slopeK!=null?{slopeOn:true,slopeK:w.slopeK}:{}),
+        ...(wfoState.slopeOn&&w.slopeK!=null?{slopeOn:true,slopeK:w.slopeK,slopeBoxKeys:[...wfoState.slopeBoxKeys]}:{}),
         // ★ BOX ĐỘC LẬP (ADX) — truyền ĐÚNG TF/ngưỡng thắng của tổ hợp IS này (w.adxTf/w.adxThreshold, do
         // runOptimizer() lưu lại khi dò adxTfs×adxThresholds) xuống cfg để btStateFromConfig() nạp đúng, KHÔNG
         // dùng wfoState.adxTfs/adxThresholds (đó là danh sách để DÒ, không phải giá trị thắng). Xóa: xóa dòng
@@ -3669,7 +4121,7 @@ async function wfo_run(){
       wfoState.statusMsg=`Test OOS mù (${wfo_dmy(seg.oosStart)} → ${wfo_dmy(seg.oosEnd)})`;
       wfo_updateProgressDom(i,segs.length,wfoState.statusMsg);
       btState.mode='load'; btState.configs=[{...cfg,_checked:true}];
-      btState.ovSizeUsd=wfoState.sizeUsd||''; btState.ovLeverage=wfoState.leverage||'';
+      btState.ovSizeUsd=wfoState.sizeUsd||''; btState.ovLeverage=wfoState.leverage||''; btState.ovFee=wfoState.fee||'';
       btState.ovStart=wfo_dmy(seg.oosStart); btState.ovEnd=wfo_dmy(seg.oosEnd);
       btState.mergePositionOn=false;
       // ★ Lưu ý: btState.slopeOn/slopeK thật sự được set bên trong runBacktest()→btStateFromConfig(cfg) đọc từ
@@ -3705,7 +4157,7 @@ async function wfo_run(){
       optState.minTrades=wfoState.minTrades; optState.minWR=wfoState.minWR;
       optState.minPnl=0; optState.minTp=wfoState.minTp||0; optState.minSl=wfoState.minSl||0; optState.minNetPnl=wfoState.minNetPnl||0;
       optState.consecLossOn=false; optState.maxOrders=wfoState.maxOrders; optState.sortBy='netpnl';
-      optState.slopeOn=wfoState.slopeOn; optState.slopeKs=[...wfoState.slopeKs];
+      optState.slopeOn=wfoState.slopeOn; optState.slopeKs=[...wfoState.slopeKs]; optState.slopeBoxKeys=[...wfoState.slopeBoxKeys];
       optState.adxOn=wfoState.adxOn; optState.adxTfs=[...wfoState.adxTfs]; optState.adxThresholds=[...wfoState.adxThresholds]; // ★ BOX ĐỘC LẬP (ADX) — mirror y hệt slope. Xóa dòng này để gỡ.
       ENTRY_BOXES.forEach(eb=>{ optState[eb.key].on=wfoState[eb.key].on; optState[eb.key].tf=wfoState[eb.key].tf; });
       INDICATOR_BOXES.forEach(b=>{ optState[b.key].on=wfoState[b.key].on; optState[b.key].tfs=[...wfoState[b.key].tfs]; });
@@ -3804,7 +4256,7 @@ function wfo_exportLastConfig(){
   const w=fc.winner;
   const cfg={coin:wfoState.coin,tp:w.tp,sl:w.sl,dir:w.dir,entrySignal:w.entrySignal,entryTf:w.entryTf,level:w.level,period:w.period,maxOrders:wfoState.maxOrders,
     // ★ BOX ĐỘC LẬP (Độ dốc filter) — xuất đúng k thắng của config deploy (w.slopeK). Xóa: xóa dòng này để gỡ.
-    ...(wfoState.slopeOn&&w.slopeK!=null?{slopeOn:true,slopeK:w.slopeK}:{}),
+    ...(wfoState.slopeOn&&w.slopeK!=null?{slopeOn:true,slopeK:w.slopeK,slopeBoxKeys:[...wfoState.slopeBoxKeys]}:{}),
     // ★ BOX ĐỘC LẬP (ADX) — xuất đúng TF/ngưỡng thắng của config deploy (w.adxTf/w.adxThreshold). Xóa: xóa dòng này để gỡ.
     ...(wfoState.adxOn&&w.adxTf!=null?{adxOn:true,adxTf:w.adxTf,adxThreshold:w.adxThreshold}:{})};
   INDICATOR_BOXES.forEach(b=>{ const v=w[b.key+'Tf']; if(v&&v!=='none')cfg[b.key]=v; });
@@ -3903,6 +4355,7 @@ function wfo_boxHtml(){
           <div><div style="font-size:9px;color:var(--dim);margin-bottom:3px;">Vốn dự kiến (USDT)</div><input type="number" value="${s.capital}" onchange="wfoState.capital=parseFloat(this.value)||1000" style="font-family:'JetBrains Mono',monospace;font-size:12px;"></div>
           <div><div style="font-size:9px;color:var(--dim);margin-bottom:3px;">Đòn bẩy</div><input type="number" value="${s.leverage}" onchange="wfoState.leverage=parseFloat(this.value)||1" style="font-family:'JetBrains Mono',monospace;font-size:12px;"></div>
           <div><div style="font-size:9px;color:var(--dim);margin-bottom:3px;">Size USD/lệnh</div><input type="number" value="${s.sizeUsd}" onchange="wfoState.sizeUsd=parseFloat(this.value)||10" style="font-family:'JetBrains Mono',monospace;font-size:12px;"></div>
+          <div><div style="font-size:9px;color:var(--dim);margin-bottom:3px;">Fee% (mỗi lệnh)</div><input type="number" step="0.01" value="${s.fee}" onchange="wfoState.fee=parseFloat(this.value)||0.1" style="font-family:'JetBrains Mono',monospace;font-size:12px;"></div>
         </div>
         <div style="font-size:9px;color:var(--dim);margin-top:4px;">⚠ Vốn dự kiến/Đòn bẩy/Size chỉ dùng cho mục 4 Monte Carlo — không ảnh hưởng 4 công thức ổn định ở mục 3.</div>
         <div style="margin-top:8px;">
@@ -3969,6 +4422,16 @@ function wfo_boxHtml(){
         <span style="font-size:9px;color:var(--dim);">so với nến trước k bước (tick nhiều để Optimizer tự dò tổ hợp mỗi đoạn IS):</span>
         ${[1,2,3,4,5,6,7,8,9,10].map(k=>`<button onclick="const i=wfoState.slopeKs.indexOf(${k});if(i>=0){if(wfoState.slopeKs.length>1)wfoState.slopeKs.splice(i,1);}else wfoState.slopeKs.push(${k});wfoState.slopeKs.sort((a,b)=>a-b);renderUtility()" style="padding:3px 8px;border-radius:5px;cursor:pointer;font:700 10px/1 'JetBrains Mono',monospace;background:${s.slopeKs.includes(k)?'var(--acc)':'var(--bg0)'};border:1px solid ${s.slopeKs.includes(k)?'var(--acc)':'var(--b2)'};color:${s.slopeKs.includes(k)?'#fff':'var(--dim)'};">${k}</button>`).join('')}
       </div>`:''}
+      <!-- ★ BOX ĐỘC LẬP (Chọn lọc theo TỪNG filter — 6 nút tick) — mirror y hệt Optimizer/Backtest Detail, chọn CỤ
+      THỂ filter nào được áp độ dốc (mặc định đủ cả 6, khớp hành vi cũ). Xóa: xóa div này + dòng cảnh báo dưới để
+      gỡ riêng phần chọn filter, quay về áp đồng loạt (giữ nguyên slopeOn/slopeKs ở 2 div trên) — field/dòng mirror
+      wfoState.slopeBoxKeys xóa riêng theo chỉ dẫn ở đó. -->
+      ${s.slopeOn?`<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:rgba(79,70,229,.05);border:1px solid var(--acc);border-top:none;border-radius:0 0 8px 8px;padding:6px 10px;margin-top:-4px;margin-bottom:10px;">
+        <span style="font-size:9px;color:var(--dim);">áp độ dốc cho filter nào (tick chọn):</span>
+        ${INDICATOR_BOXES.map(b=>`<button onclick="const i=wfoState.slopeBoxKeys.indexOf('${b.key}');i>=0?wfoState.slopeBoxKeys.splice(i,1):wfoState.slopeBoxKeys.push('${b.key}');renderUtility()" style="padding:3px 8px;border-radius:5px;cursor:pointer;font:700 10px/1 'JetBrains Mono',monospace;background:${s.slopeBoxKeys.includes(b.key)?'var(--acc)':'var(--bg0)'};border:1px solid ${s.slopeBoxKeys.includes(b.key)?'var(--acc)':'var(--b2)'};color:${s.slopeBoxKeys.includes(b.key)?'#fff':'var(--dim)'};">${b.label.replace(' · P20','').replace(' · EMA20','')}</button>`).join('')}
+      </div>
+      ${(()=>{const bad=s.slopeBoxKeys.filter(k=>!s[k].on);return bad.length?`<div style="font-size:10px;color:var(--red);margin:-4px 0 8px;">⚠ Đang chọn tính độ dốc cho ${bad.map(k=>INDICATOR_BOXES.find(b=>b.key===k).label).join(', ')} nhưng bộ lọc đó đang TẮT — không có tác dụng.</div>`:'';})()}
+      `:''}
 
       <!-- 1c. Filter trade — modul con, xóa div này để gỡ riêng, WFO vẫn chạy được (Optimizer coi như không bật filter trade) -->
       <div style="background:var(--bg0);border:1px solid var(--b2);border-radius:10px;padding:10px 12px;margin-bottom:10px;">
